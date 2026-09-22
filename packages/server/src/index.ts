@@ -1,3 +1,4 @@
+export * from "./auth/atrust";
 export * from "./auth/random-password";
 export * from "./constants/index";
 export * from "./db/constants";

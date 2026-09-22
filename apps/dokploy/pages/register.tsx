@@ -1,7 +1,7 @@
 import { IS_CLOUD, isAdminPresent, validateRequest } from "@dokploy/server";
 import { standardSchemaResolver as zodResolver } from "@hookform/resolvers/standard-schema";
 import { generateServerSideHelper } from "@/utils/create-server-helpers";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ShieldCheck } from "lucide-react";
 import type { GetServerSidePropsContext } from "next";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -85,6 +85,14 @@ const Register = ({ isCloud }: Props) => {
 	const { config: whitelabeling } = useWhitelabelingPublic();
 	const [isError, setIsError] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [atrustEnabled, setATrustEnabled] = useState(false);
+
+	useEffect(() => {
+		fetch("/api/auth/atrust/status")
+			.then((r) => r.json())
+			.then((d) => setATrustEnabled(Boolean(d?.enabled)))
+			.catch(() => {});
+	}, []);
 	const [data, setData] = useState<any>(null);
 
 	const form = useForm<Register>({
@@ -267,6 +275,19 @@ const Register = ({ isCloud }: Props) => {
 									</div>
 								</form>
 							</Form>
+							{atrustEnabled && (
+								<Button
+									variant="outline"
+									type="button"
+									className="w-full mt-4"
+									onClick={() => {
+										window.location.href = "/api/auth/atrust/start";
+									}}
+								>
+									<ShieldCheck className="size-4" />
+									零信任账号登录
+								</Button>
+							)}
 							<div className="flex flex-row justify-between flex-wrap">
 								{isCloud && (
 									<div className="mt-4 text-center text-sm flex gap-2 text-muted-foreground">

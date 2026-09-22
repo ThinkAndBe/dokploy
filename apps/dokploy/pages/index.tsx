@@ -7,7 +7,7 @@ import { validateRequest } from "@dokploy/server/lib/auth";
 import { standardSchemaResolver as zodResolver } from "@hookform/resolvers/standard-schema";
 import { generateServerSideHelper } from "@/utils/create-server-helpers";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
-import { Fingerprint } from "lucide-react";
+import { Fingerprint, ShieldCheck } from "lucide-react";
 import type { GetServerSidePropsContext } from "next";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -76,6 +76,14 @@ export default function Home({ IS_CLOUD, enforceSSO }: Props) {
 	const [isBackupCodeLoading, setIsBackupCodeLoading] = useState(false);
 	const [isTwoFactor, setIsTwoFactor] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [atrustEnabled, setATrustEnabled] = useState(false);
+
+	useEffect(() => {
+		fetch("/api/auth/atrust/status")
+			.then((r) => r.json())
+			.then((d) => setATrustEnabled(Boolean(d?.enabled)))
+			.catch(() => {});
+	}, []);
 	const [twoFactorCode, setTwoFactorCode] = useState("");
 	const [isBackupCodeModalOpen, setIsBackupCodeModalOpen] = useState(false);
 	const [backupCode, setBackupCode] = useState("");
@@ -237,6 +245,19 @@ export default function Home({ IS_CLOUD, enforceSSO }: Props) {
 
 	const loginContent = (
 		<>
+			{atrustEnabled && (
+				<Button
+					variant="outline"
+					className="w-full mb-4"
+					type="button"
+					onClick={() => {
+						window.location.href = "/api/auth/atrust/start";
+					}}
+				>
+					<ShieldCheck className="size-4" />
+					零信任账号登录
+				</Button>
+			)}
 			{IS_CLOUD && <SignInWithGithub />}
 			{IS_CLOUD && <SignInWithGoogle />}
 			<Form {...loginForm}>
