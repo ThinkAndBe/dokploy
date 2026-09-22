@@ -23,6 +23,7 @@ export * from "./services/docker-image";
 export * from "./services/docker-volume";
 export * from "./services/domain";
 export * from "./services/environment";
+export * from "./services/gitea-integration";
 export * from "./services/git-provider";
 export * from "./services/gitea";
 export * from "./services/github";
