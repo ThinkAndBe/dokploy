@@ -7,6 +7,7 @@ import { ThemeProvider } from "next-themes";
 import NextTopLoader from "nextjs-toploader";
 import type { ReactElement, ReactNode } from "react";
 import { SearchCommand } from "@/components/dashboard/search-command";
+import { ChineseLocalizer } from "@/components/i18n-zh/ChineseLocalizer";
 import { Analytics } from "@/components/shared/analytics";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -47,6 +48,7 @@ const MyApp = ({
 					forcedTheme={Component.theme}
 				>
 					<NextTopLoader color="hsl(var(--sidebar-ring))" />
+				<ChineseLocalizer />
 					<Analytics />
 					<Toaster richColors />
 					<SearchCommand />
