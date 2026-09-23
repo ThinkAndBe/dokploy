@@ -1,4 +1,3 @@
-import { createAuditLog } from "./proprietary/audit-log";
 
 // gitea-integration.ts — AppHub 二开（M3）：项目创建时自动开 Gitea 仓库
 // 「版本管理与发布一体化」：平台建项目 → Gitea 自动出现对应 org/repo。
@@ -110,17 +109,6 @@ export async function provisionGiteaForProject(project: {
 			name: project.name,
 			description: project.description,
 		});
-		try {
-			await createAuditLog({
-				organizationId: project.organizationId || "",
-				action: "gitea.repo.provisioned",
-				resourceType: "project",
-				resourceId: project.projectId,
-				metadata: JSON.stringify(result),
-			} as Parameters<typeof createAuditLog>[0]);
-		} catch {
-			// 审计失败不影响主流程
-		}
 		console.log(
 			`[gitea-integration] 项目「${project.name}」已开仓：${result.repoUrl}`,
 		);

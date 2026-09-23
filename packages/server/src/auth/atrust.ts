@@ -149,6 +149,7 @@ export async function atrustLogin(u: ATrustUserInfo): Promise<ATrustLoginResult>
 			})
 			.returning();
 		dbUser = inserted[0];
+		if (!dbUser) throw new Error("创建用户失败");
 	} else if (u.displayName && dbUser.firstName !== u.displayName) {
 		await db
 			.update(schema.user)
@@ -156,6 +157,8 @@ export async function atrustLogin(u: ATrustUserInfo): Promise<ATrustLoginResult>
 			.where(eq(schema.user.id, dbUser.id));
 		dbUser.firstName = u.displayName;
 	}
+
+	if (!dbUser) throw new Error("用户不存在");
 
 	// 组织归属
 	let member = await db.query.member.findFirst({
@@ -189,10 +192,12 @@ export async function atrustLogin(u: ATrustUserInfo): Promise<ATrustLoginResult>
 						createdAt: now,
 					})
 					.returning();
+				const orgRow = org[0];
+				if (!orgRow) throw new Error("创建组织失败");
 				const m = await tx
 					.insert(schema.member)
 					.values({
-						organizationId: org[0].id,
+						organizationId: orgRow.id,
 						userId: dbUser.id,
 						role: "owner",
 						createdAt: now,
@@ -203,6 +208,7 @@ export async function atrustLogin(u: ATrustUserInfo): Promise<ATrustLoginResult>
 			});
 		}
 	}
+	if (!member) throw new Error("组织归属失败");
 
 	// 建会话（better-auth 兼容：直插 session 表，cookie 由调用方设置）
 	const token = crypto.randomBytes(32).toString("hex");
