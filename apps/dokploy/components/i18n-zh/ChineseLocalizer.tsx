@@ -71,6 +71,16 @@ export function ChineseLocalizer() {
 
 		scheduleWalk();
 
+		// 生产构建水合竞态兜底：SSR 英文 HTML 在水合期间可能把过早的翻译
+		// 还原（React 检测文本不一致后按客户端渲染修复）。水合稳定后延迟
+		// 多轮补翻，覆盖登录后跳转/慢渲染的极端时序。
+		const RETRY_DELAYS = [400, 1200, 3000];
+		const timers = RETRY_DELAYS.map((d) =>
+			setTimeout(() => {
+				if (active) scheduleWalk();
+			}, d),
+		);
+
 		const onRouteChange = () => scheduleWalk();
 		router.events.on("routeChangeComplete", onRouteChange);
 
@@ -78,6 +88,7 @@ export function ChineseLocalizer() {
 			active = false;
 			router.events.off("routeChangeComplete", onRouteChange);
 			if (rafRef.current) cancelAnimationFrame(rafRef.current);
+			for (const t of timers) clearTimeout(t);
 			observerRef.current?.disconnect();
 		};
 	}, [router.events]);
