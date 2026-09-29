@@ -1,3 +1,4 @@
+import {productionWebConfig} from '@dokploy/server/lib/production-mode';
 import type { NextApiRequest, NextApiResponse } from "next";
 import {
 	ATRUST_SESSION_COOKIE,
@@ -50,8 +51,8 @@ export default async function handler(
 		const { token, expiresAt } = await atrustLogin(info);
 		const maxAge = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
 		res.setHeader("Set-Cookie", [
-			`${ATRUST_SESSION_COOKIE}=${encodeURIComponent(atrustSignedSessionCookie(token))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`,
-			`${STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+			`${ATRUST_SESSION_COOKIE}=${encodeURIComponent(atrustSignedSessionCookie(token))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${productionWebConfig().cookieSuffix}`,
+			`${STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${productionWebConfig().cookieSuffix}`,
 		]);
 		res.redirect(302, "/dashboard/projects");
 	} catch (e) {

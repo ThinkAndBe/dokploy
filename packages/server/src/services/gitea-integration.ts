@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 // gitea-integration.ts — AppHub 二开（M3）：项目创建时自动开 Gitea 仓库
 // 「版本管理与发布一体化」：平台建项目 → Gitea 自动出现对应 org/repo。
@@ -12,7 +14,7 @@
 export const isGiteaIntegrationEnabled = (): boolean => {
 	return Boolean(
 		process.env.GITEA_API_URL &&
-			process.env.GITEA_TOKEN &&
+			(process.env.GITEA_TOKEN || process.env.GITEA_TOKEN_FILE) &&
 			process.env.GITEA_INTEGRATION_ENABLED !== "false",
 	);
 };
@@ -20,20 +22,27 @@ export const isGiteaIntegrationEnabled = (): boolean => {
 const giteaApi = () =>
 	(process.env.GITEA_API_URL || "").replace(/\/+$/, "") + "/api/v1";
 
+export const giteaToken = (): string => {
+	const token = process.env.GITEA_TOKEN_FILE
+		? readFileSync(process.env.GITEA_TOKEN_FILE, "utf8").trim()
+		: (process.env.GITEA_TOKEN || "").trim();
+	if (!token || /[\r\n]/.test(token)) throw new Error("Gitea 凭据未配置或无效");
+	return token;
+};
+
 const authHeaders = () => ({
-	Authorization: `token ${process.env.GITEA_TOKEN}`,
+	Authorization: `token ${giteaToken()}`,
 	"Content-Type": "application/json",
 });
 
 const orgName = () => process.env.GITEA_DEFAULT_ORG || "apphub-apps";
 
-export const repoSlug = (name: string) =>
-	name
-		.toLowerCase()
-		.trim()
-		.replace(/[^a-z0-9-_]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.slice(0, 60) || `project-${Date.now()}`;
+export const repoSlug = (_name: string, projectId: string): string => {
+	if (!projectId.trim()) throw new Error("缺少项目唯一标识");
+	const prefix = "project"; // Display-name changes must not create a new repository.
+	// A display name cannot identify a repository across projects or organizations.
+	return `${prefix}-${createHash("sha256").update(projectId).digest("hex").slice(0, 20)}`;
+};
 
 async function ensureOrg(): Promise<string> {
 	const org = orgName();
@@ -63,6 +72,7 @@ export interface ProvisionResult {
 }
 
 export async function provisionGiteaRepo(opts: {
+	projectId: string;
 	name: string;
 	description?: string | null;
 }): Promise<ProvisionResult> {
@@ -70,7 +80,7 @@ export async function provisionGiteaRepo(opts: {
 		throw new Error("Gitea 集成未配置");
 	}
 	const org = await ensureOrg();
-	const repo = repoSlug(opts.name);
+	const repo = repoSlug(opts.name, opts.projectId);
 	const res = await fetch(`${giteaApi()}/orgs/${org}/repos`, {
 		method: "POST",
 		headers: authHeaders(),
@@ -84,9 +94,9 @@ export async function provisionGiteaRepo(opts: {
 	});
 	if (!res.ok && res.status !== 409) {
 		// 409=已存在（幂等重试）
-		throw new Error(`创建仓库失败 HTTP ${res.status}: ${await res.text()}`);
+		throw new Error(`创建仓库失败 HTTP ${res.status}`);
 	}
-	const base = (process.env.GITEA_API_URL || "").replace(/\/+$/, "");
+	const base = (process.env.GITEA_PUBLIC_URL || process.env.GITEA_API_URL || "").replace(/\/+$/, "");
 	return {
 		repoUrl: `${base}/${org}/${repo}`,
 		cloneUrl: `${base}/${org}/${repo}.git`,
@@ -94,7 +104,7 @@ export async function provisionGiteaRepo(opts: {
 }
 
 /**
- * 建项目后调用：自动开仓并落库记录（projects.giteaRepoUrl）。
+ * 建项目后调用：自动开仓并返回仓库关联信息。
  * 软失败：任何异常记审计日志后吞掉，不影响项目创建主流程。
  */
 export async function provisionGiteaForProject(project: {
@@ -106,6 +116,7 @@ export async function provisionGiteaForProject(project: {
 	if (!isGiteaIntegrationEnabled()) return null;
 	try {
 		const result = await provisionGiteaRepo({
+			projectId: project.projectId,
 			name: project.name,
 			description: project.description,
 		});

@@ -1,3 +1,6 @@
+import {versionInput,versionListOutput} from '@dokploy/server/services/version-api';
+import {createApiKey} from '@dokploy/server/services/user';
+import {readHandoff,canRevealCredential,revealCredential} from "@dokploy/server/services/apphub-handoff";
 import {
 	createApplication,
 	createBackup,
@@ -31,6 +34,10 @@ import {
 	updateProjectById,
 	updateUser,
 } from "@dokploy/server";
+import { accessScope } from "@dokploy/server/services/apphub-access";
+import { projectWorkspace } from "@dokploy/server/services/apphub-workspace";
+import { repositoryVersions,createRepositoryVersion } from "@dokploy/server/services/apphub-versions";
+import { ensureProjectRepository } from "@dokploy/server/services/project-repository";
 import { db } from "@dokploy/server/db";
 import {
 	addNewEnvironment,
@@ -68,7 +75,64 @@ import {
 } from "@/server/db/schema";
 import { getBillingStatus } from "@/server/utils/billing";
 
+import {sharingDetails,changeSharing,initializeProjectOwner} from '@dokploy/server/services/project-sharing';
+const sharingActor=(ctx:any)=>({id:ctx.user.id,organizationId:ctx.session.activeOrganizationId,apiKey:ctx.req.headers['x-api-key']});
 export const projectRouter = createTRPCRouter({
+ sharing:protectedProcedure.input(z.object({projectId:z.string().min(1)})).query(({ctx,input})=>sharingDetails(sharingActor(ctx),input.projectId)),
+ changeSharing:protectedProcedure.input(z.object({projectId:z.string().min(1),userId:z.string().min(1),action:z.enum(['grant','revoke','transfer']),keepPrevious:z.boolean().default(false)})).mutation(({ctx,input})=>changeSharing(sharingActor(ctx),input)),
+ serviceHandoff: protectedProcedure.input(z.object({serviceId:z.string().min(1).max(200)})).query(async({input,ctx})=>{
+  const rows=await projectWorkspace(ctx.user.id,ctx.session.activeOrganizationId);
+  if(!rows.some(p=>p.environments.some(e=>e.services.some(s=>s.id===input.serviceId))))throw new TRPCError({code:"NOT_FOUND",message:"应用不存在或尚未授权"});
+  try{return {handoff:await readHandoff(input.serviceId),canRevealCredential:canRevealCredential(ctx.user.role,ctx.req.headers['x-api-key'])};}catch{throw new TRPCError({code:"INTERNAL_SERVER_ERROR",message:"交付说明暂时无法读取，请联系运维"});}
+ }),
+ revealServiceCredential: protectedProcedure.input(z.object({serviceId:z.string().min(1).max(200)})).mutation(async({input,ctx})=>{
+  if(!canRevealCredential(ctx.user.role,ctx.req.headers['x-api-key']))throw new TRPCError({code:"FORBIDDEN",message:"仅平台管理员登录后可查看应用初始凭据"});
+  const rows=await projectWorkspace(ctx.user.id,ctx.session.activeOrganizationId);
+  if(!rows.some(p=>p.environments.some(e=>e.services.some(s=>s.id===input.serviceId))))throw new TRPCError({code:"NOT_FOUND",message:"应用不存在或尚未授权"});
+  ctx.res.setHeader('Cache-Control','no-store');
+  try{return await revealCredential(input.serviceId,ctx.user.id,ctx.session.activeOrganizationId);}catch{throw new TRPCError({code:"PRECONDITION_FAILED",message:"凭据尚未登记或暂时无法读取，请联系运维"});}
+ }),
+
+ workspace: protectedProcedure.query(({ctx})=>projectWorkspace(ctx.user.id,ctx.session.activeOrganizationId)),
+ repositoryVersions: protectedProcedure.meta({openapi:{method:'GET',path:'/project.repositoryVersions',protect:true,tags:['Project versions'],summary:'读取获授权项目的版本与提交历史'}}).output(versionListOutput).input(z.object({projectId:z.string().min(1),page:z.number().int().min(1).max(10000).default(1)})).query(async({input,ctx})=>{
+  const member=await findMemberByUserId(ctx.user.id,ctx.session.activeOrganizationId);
+  const project=await db.query.projects.findFirst({where:and(eq(projects.projectId,input.projectId),eq(projects.organizationId,ctx.session.activeOrganizationId)),columns:{projectId:true,giteaRepoUrl:true}});
+  if(!project || !accessScope(member).project(input.projectId))throw new TRPCError({code:"NOT_FOUND",message:"项目不存在或尚未授权"});
+  if(!project.giteaRepoUrl)throw new TRPCError({code:"PRECONDITION_FAILED",message:"项目尚未关联代码仓库，请联系运维"});
+  try{return await repositoryVersions(project.projectId,project.giteaRepoUrl,input.page);}catch{throw new TRPCError({code:"BAD_GATEWAY",message:"暂时无法读取版本记录，请稍后重试或联系运维"});}
+ }),
+
+ createVersion:protectedProcedure.meta({openapi:{method:'POST',path:'/project.createVersion',protect:true,tags:['Project versions'],summary:'为固定代码提交建立不可覆盖的版本'}}).input(versionInput).output(z.object({name:z.string(),sha:z.string(),created:z.boolean()})).mutation(async({ctx,input})=>{
+  const member=await findMemberByUserId(ctx.user.id,ctx.session.activeOrganizationId);
+  const p=await db.query.projects.findFirst({where:and(eq(projects.projectId,input.projectId),eq(projects.organizationId,ctx.session.activeOrganizationId)),columns:{projectId:true,giteaRepoUrl:true}});
+  if(!p||!accessScope(member).project(input.projectId))throw new TRPCError({code:'NOT_FOUND',message:'项目不存在或尚未授权'});
+  if(!p.giteaRepoUrl)throw new TRPCError({code:'PRECONDITION_FAILED',message:'项目尚未关联代码仓库'});
+  try{const result=await createRepositoryVersion(p.projectId,p.giteaRepoUrl,input.name,input.commit,input.description);await audit(ctx,{action:'create',resourceType:'project',resourceId:p.projectId,resourceName:'version:'+input.name});return result;}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'版本创建失败'});}
+ }),
+ createVersionKey:protectedProcedure.input(z.object({})).mutation(async({ctx})=>{
+  if(ctx.req.headers['x-api-key'])throw new TRPCError({code:'FORBIDDEN',message:'请登录页面后生成版本接口密钥'});
+  ctx.res.setHeader('Cache-Control','no-store');
+  const metadata={organizationId:ctx.session.activeOrganizationId,apphubScope:'version-management'};
+  const key=await createApiKey(ctx.user.id,{name:'AppHub 版本管理',expiresIn:604800,metadata,rateLimitEnabled:true,rateLimitTimeWindow:60000,rateLimitMax:60});
+  return {id:key.id,key:key.key,expiresAt:key.expiresAt};
+ }),
+
+	retryRepository: protectedProcedure.input(apiFindOneProject).mutation(async ({ctx, input}) => {
+		const member = await findMemberByUserId(ctx.user.id, ctx.session.activeOrganizationId);
+		const project = await findProjectById(input.projectId);
+		if (project.organizationId !== ctx.session.activeOrganizationId ||
+			(member.role !== "owner" && member.role !== "admin" && !member.accessedProjects.includes(input.projectId))) {
+			throw new TRPCError({code: "FORBIDDEN", message: "无权操作此项目"});
+		}
+		// Existing unlinked projects may already have an older repository. Never guess it.
+		if (project.giteaRepoStatus !== "failed" && !project.giteaRepoUrl) {
+			throw new TRPCError({code: "PRECONDITION_FAILED", message: "此项目未关联代码仓库，请联系运维核对已有仓库"});
+		}
+		const result = await ensureProjectRepository(input.projectId);
+		if (!result) throw new TRPCError({code: "BAD_REQUEST", message: "创建仓库未成功，请运维检查 Gitea 连接及凭据后重试"});
+		await audit(ctx, {action: "update", resourceType: "project", resourceId: input.projectId, resourceName: "repository-binding"});
+		return result;
+	}),
 	create: protectedProcedure
 		.input(apiCreateProject)
 		.mutation(async ({ ctx, input }) => {
@@ -89,6 +153,7 @@ export const projectRouter = createTRPCRouter({
 					ctx.session.activeOrganizationId,
 				);
 				await addNewProject(ctx, project.project.projectId);
+                await initializeProjectOwner(sharingActor(ctx),project.project.projectId);
 
 				await addNewEnvironment(ctx, project?.environment?.environmentId || "");
 

@@ -14,7 +14,7 @@ import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import type { z } from "zod";
 import { createProductionEnvironment } from "./environment";
-import { provisionGiteaForProject } from "./gitea-integration";
+import { ensureProjectRepository } from "./project-repository";
 
 export type Project = typeof projects.$inferSelect;
 
@@ -44,12 +44,7 @@ export const createProject = async (
 	);
 
 	// AppHub：自动开 Gitea 仓库（软失败，不影响项目创建）
-	const giteaRepo = await provisionGiteaForProject({
-		projectId: newProject.projectId,
-		name: newProject.name,
-		description: newProject.description,
-		organizationId: (newProject as { organizationId?: string }).organizationId,
-	});
+	const giteaRepo = await ensureProjectRepository(newProject.projectId);
 
 	return {
 		project: newProject,

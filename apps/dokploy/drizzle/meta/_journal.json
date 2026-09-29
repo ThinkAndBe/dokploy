@@ -1373,6 +1373,27 @@
       "when": 1788867370653,
       "tag": "0195_classy_whirlwind",
       "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1790570583027,
+      "tag": "0196_apphub_repository_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "7",
+      "when": 1790600624127,
+      "tag": "0197_apphub_release_flow",
+      "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1790655000000,
+      "tag": "0198_apphub_project_delivery",
+      "breakpoints": true
     }
   ]
 }

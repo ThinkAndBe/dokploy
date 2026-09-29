@@ -1,3 +1,4 @@
+import { globalDockerCleanupAllowed } from "@dokploy/server/services/apphub-policy";
 import { CLEANUP_CRON_JOB } from "@dokploy/server/constants";
 import { member } from "@dokploy/server/db/schema";
 import type { BackupSchedule } from "@dokploy/server/services/backup";
@@ -30,7 +31,7 @@ export const initCronJobs = async () => {
 
 	const webServerSettings = await getWebServerSettings();
 
-	if (webServerSettings?.enableDockerCleanup) {
+	if (globalDockerCleanupAllowed() && webServerSettings?.enableDockerCleanup) {
 		try {
 			scheduleJob("docker-cleanup", CLEANUP_CRON_JOB, async () => {
 				console.log(
@@ -50,7 +51,7 @@ export const initCronJobs = async () => {
 
 	for (const server of servers) {
 		const { serverId, enableDockerCleanup, name } = server;
-		if (enableDockerCleanup) {
+		if (globalDockerCleanupAllowed() && enableDockerCleanup) {
 			try {
 				scheduleJob(serverId, CLEANUP_CRON_JOB, async () => {
 					console.log(

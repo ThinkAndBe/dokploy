@@ -1,3 +1,6 @@
+import { authClient } from "@/lib/auth-client";
+import { SearchCommand } from "@/components/dashboard/search-command";
+import { translateText } from "@/components/i18n-zh/translate";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { useEffect } from "react";
@@ -14,10 +17,15 @@ interface Props {
 
 export const DashboardLayout = ({ children, metaName }: Props) => {
 	const router = useRouter();
+ const {data:actor}=api.user.get.useQuery();
+ const simplified=!!actor&&actor.role!=='owner'&&actor.role!=='admin'&&(router.pathname==='/dashboard/projects'||router.pathname.startsWith('/dashboard/project/'));
+ useEffect(()=>{if(simplified)void router.replace('/dashboard/home');},[simplified,router]);
+ const {data:loginSession,isPending:checkingLogin}=authClient.useSession();
+ useEffect(()=>{if(!checkingLogin&&!loginSession)void router.replace("/");},[checkingLogin,loginSession,router]);
 	const { data: haveRootAccess } = api.user.haveRootAccess.useQuery();
 	const { data: isCloud } = api.settings.isCloud.useQuery();
 	const { config: whitelabeling } = useWhitelabeling();
-	const appName = whitelabeling?.appName || "Dokploy";
+	const appName = whitelabeling?.appName || "AppHub";
 	const { data: currentPlan } = api.stripe.getCurrentPlan.useQuery(undefined, {
 		enabled: isCloud === true,
 		refetchOnWindowFocus: false,
@@ -33,12 +41,12 @@ export const DashboardLayout = ({ children, metaName }: Props) => {
 		onboardingStatus?.shouldShowOnboarding === true;
 
 	useEffect(() => {
-		if (shouldRedirectToOnboarding) {
+		if (loginSession && shouldRedirectToOnboarding) {
 			router.replace("/dashboard/home");
 		}
-	}, [shouldRedirectToOnboarding, router]);
+	}, [shouldRedirectToOnboarding, router, loginSession]);
 
-	if (shouldRedirectToOnboarding) {
+	if (!loginSession || shouldRedirectToOnboarding || simplified) {
 		return null;
 	}
 
@@ -47,11 +55,11 @@ export const DashboardLayout = ({ children, metaName }: Props) => {
 			{metaName && (
 				<Head>
 					<title>
-						{metaName} | {appName}
+						{translateText(metaName)} | {appName}
 					</title>
 				</Head>
 			)}
-			<Page>{children}</Page>
+			<SearchCommand/><Page>{children}</Page>
 			{isChatEnabled && (
 				<>
 					<HubSpotWidget />

@@ -82,6 +82,9 @@ const baseApp: ApplicationNested = {
 		description: "",
 		projectId: "",
 		project: {
+			giteaRepoUrl: null,
+			giteaCloneUrl: null,
+			giteaRepoStatus: "unconfigured",
 			env: "",
 			organizationId: "",
 			name: "",

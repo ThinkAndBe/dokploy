@@ -1,0 +1,14 @@
+import {describe,it,expect} from 'vitest';
+import {databaseSchema,databaseCompose,poolSecretFiles,databaseIdentity} from '../../../../packages/server/src/services/database-policy';
+import {releaseInput,validateConfiguration} from '../../../../packages/server/src/services/release-policy';
+const image='registry.local/base/postgres@sha256:'+'a'.repeat(64),poolImage='registry.local/base/pool@sha256:'+'b'.repeat(64),id='8fdf4146-22a1-4ff0-84e0-51d0f8ec3760';
+const c=databaseSchema.parse({kind:'database',name:'业务数据库',engine:'postgres',databaseName:'business',image,poolImage});
+const t:any={imagePrefixes:['registry.local/base/'],databaseNode:'db-node',databaseImages:{postgres:{image,poolImage}}};
+describe('Managed database boundaries',()=>{
+ it('requires explicit approved database and pool images',()=>{expect(()=>validateConfiguration(c,t)).not.toThrow();expect(()=>validateConfiguration(c,{...t,databaseImages:undefined})).toThrow();expect(()=>validateConfiguration({...c,poolImage:image},t)).toThrow();});
+ it('rejects unsafe identifiers, unbounded pools and secret submission',()=>{for(const change of [{databaseName:'db;DROP TABLE x'},{poolSize:500},{maxClients:1},{password:'user-supplied'},{poolSize:80,maxClients:10}])expect(()=>databaseSchema.parse({...c,...change})).toThrow();});
+ it('creates internal, pinned, persistent single-instance resources',()=>{const d=databaseCompose(c,id,'db-node');expect(d.networks.database.internal).toBe(true);expect(d.services.database).not.toHaveProperty('ports');expect(d.services.pool).not.toHaveProperty('ports');expect(d.services.database.deploy.placement.constraints).toEqual(['node.hostname == db-node']);expect(d.services.database.volumes).toEqual(['data:/var/lib/postgresql/data']);});
+ it('keeps application role separate from database root and secrets outside compose',()=>{const d=databaseCompose(c,id,'db-node');expect(d.services.database.environment.POSTGRES_USER).toBe('platform_root');const s=poolSecretFiles(c,id,'1'.repeat(64),'2'.repeat(64),'3'.repeat(64));expect(s.init).toContain('NOSUPERUSER NOCREATEDB NOCREATEROLE');expect(s.pool).toContain('pool_mode = session');expect(JSON.stringify(d)).not.toContain('1'.repeat(64));expect(s.url).toContain(databaseIdentity(id).host);});
+ it('uses isolated mysql app account and compatibility-first proxy settings',()=>{const m=databaseSchema.parse({...c,engine:'mysql'}),d=databaseCompose(m,id,'db-node'),s=poolSecretFiles(m,id,'1'.repeat(64),'2'.repeat(64),'3'.repeat(64));expect(d.services.database.environment.MYSQL_USER).not.toBe('root');expect(d.services.database.environment.MYSQL_ROOT_HOST).toBe('localhost');expect(s.pool).toContain('multiplexing=false');expect(s.pool).toContain('transaction_persistent=1');});
+ it('accepts database requests in the same approved proposal schema',()=>{expect(releaseInput.parse({environmentId:'e',title:'申请数据库',idempotencyKey:id,configuration:c}).configuration.kind).toBe('database');});
+});

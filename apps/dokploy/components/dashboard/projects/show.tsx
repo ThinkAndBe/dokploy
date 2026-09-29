@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/utils/api";
 import { useDebounce } from "@/utils/hooks/use-debounce";
+import { ProjectRepository } from "./repository";
 import { HandleProject } from "./handle-project";
 import { ProjectEnvironment } from "./project-environment";
 
@@ -506,6 +507,7 @@ export const ShowProjects = () => {
 															</CardFooter>
 														</Card>
 													</Link>
+<ProjectRepository projectId={project.projectId} url={project.giteaRepoUrl} status={project.giteaRepoStatus} />
 												</div>
 											);
 										})}

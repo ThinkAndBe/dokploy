@@ -15,6 +15,9 @@ export const projects = pgTable("project", {
 		.$defaultFn(() => nanoid()),
 	name: text("name").notNull(),
 	description: text("description"),
+	giteaRepoUrl: text("giteaRepoUrl"),
+	giteaCloneUrl: text("giteaCloneUrl"),
+	giteaRepoStatus: text("giteaRepoStatus").notNull().default("unconfigured"),
 	createdAt: text("createdAt")
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
@@ -65,7 +68,7 @@ export const apiRemoveProject = createSchema
 // 	})
 // 	.required();
 
-export const apiUpdateProject = createSchema.partial().extend({
+export const apiUpdateProject = createSchema.omit({ giteaRepoUrl: true, giteaCloneUrl: true, giteaRepoStatus: true }).partial().extend({
 	projectId: z.string().min(1),
 });
 // .omit({ serverId: true });

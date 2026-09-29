@@ -118,7 +118,6 @@ export const ZH_DICT: Record<string, string> = {
 	Version: "版本",
 	Actions: "操作",
 	Details: "详情",
-	Overview: "总览",
 	General: "常规",
 	Advanced: "高级",
 	Environment: "环境",
@@ -132,7 +131,6 @@ export const ZH_DICT: Record<string, string> = {
 	Variables: "变量",
 	Config: "配置",
 	Preview: "预览",
-	Settings: "设置",
 
 	// ── 项目/环境 ──
 	"Create and manage your projects": "创建和管理你的项目",
@@ -249,6 +247,5 @@ export const ZH_DICT: Record<string, string> = {
 	"1 service": "1 个服务",
 	"Are you sure you want to deploy this application?": "确定要部署此应用吗？",
 	"Deploy Application": "部署应用",
-	"Confirm": "确认",
 	"Dokploy Server": "Dokploy 服务器",
 };

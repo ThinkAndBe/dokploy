@@ -1,0 +1,15 @@
+import {describe,it,expect,beforeAll,afterAll} from 'vitest';
+import {readFileSync} from 'node:fs';
+import {randomUUID} from 'node:crypto';
+import {releaseSql,insertPlan,visiblePlan,event,type Plan} from '../../../../packages/server/src/services/release-store';
+const enabled=process.env.APPHUB_RELEASE_DB_TEST==='true';
+describe.skipIf(!enabled)('Durable release plan store',()=>{
+ beforeAll(async()=>{await releaseSql.unsafe(readFileSync(new URL('../../drizzle/0197_apphub_release_flow.sql',import.meta.url),'utf8').replaceAll('--> statement-breakpoint',''));});
+ afterAll(async()=>{await releaseSql.end();});
+ function plan(){const id=randomUUID();return {id,organization_id:'test-org',project_id:'p',environment_id:'e',service_id:'s-'+id,created_by:'u',title:'test',tier:'test' as const,status:'awaiting_confirmation',plan_hash:'h',base_hash:'base',payload:{requestHash:'request',input:{configuration:{kind:'update'},description:''},compose:'sensitive baseline not in DTO',diff:[],handoff:{}}};}
+ it('concurrent identical retries create one immutable record and event',async()=>{const p=plan(),key=randomUUID();const results=await Promise.all([insertPlan(p,key),insertPlan({...p,id:randomUUID()},key)]);expect(results[0]?.id).toBe(results[1]?.id);const rows=await releaseSql`select * from apphub_release_event where plan_id=${results[0]!.id}`;expect(rows).toHaveLength(1);});
+ it('rejects reuse of an idempotency key for changed contents',async()=>{const p=plan(),key=randomUUID();await insertPlan(p,key);await expect(insertPlan({...p,id:randomUUID(),payload:{...p.payload,requestHash:'changed'}},key)).rejects.toThrow();});
+ it('does not expose raw deployment configuration in the public detail',async()=>{const saved=await insertPlan(plan(),randomUUID());expect(JSON.stringify(visiblePlan(saved as Plan))).not.toContain('sensitive baseline');});
+ it('rolls back state and audit together on transaction failure',async()=>{const p=await insertPlan(plan(),randomUUID());await expect(releaseSql.begin(async q=>{await q`update apphub_release_plan set status='queued' where id=${p.id}`;await event(q,p.id,'u','confirm');throw new Error('rollback');})).rejects.toThrow();const [r]=await releaseSql`select status from apphub_release_plan where id=${p.id}`;expect(r?.status).toBe('awaiting_confirmation');const rows=await releaseSql`select * from apphub_release_event where plan_id=${p.id}`;expect(rows).toHaveLength(1);});
+ it('serializes parallel database reservations and preserves retries at the limit',async()=>{const requests=Array.from({length:12},()=>{const p=plan();p.payload.input.configuration.kind='database';return {p,key:randomUUID()}});const results=await Promise.allSettled(requests.map(r=>insertPlan(r.p,r.key)));expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(8);expect(results.filter(r=>r.status==='rejected')).toHaveLength(4);const index=results.findIndex(r=>r.status==='fulfilled');const r=requests[index]!;const retry=await insertPlan({...r.p,id:randomUUID()},r.key);expect(retry.id).toBe(r.p.id);});
+});

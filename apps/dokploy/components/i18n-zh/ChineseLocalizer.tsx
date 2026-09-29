@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/router";
-import { ZH_DICT } from "./dictionary-zh";
+import { translateText, skipTranslation } from "./translate";
 
 // ChineseLocalizer — AppHub 运行时汉化层（M2）
 // 策略：在 _app 挂载后对 DOM 文本与常见属性做词典替换；MutationObserver
@@ -14,26 +14,15 @@ import { ZH_DICT } from "./dictionary-zh";
 const ATTRS = ["placeholder", "aria-label", "title"];
 
 function translateNode(node: Node) {
-	if (node.nodeType === Node.TEXT_NODE) {
-		const raw = (node.nodeValue || "").trim();
-		if (raw && ZH_DICT[raw]) {
-			node.nodeValue = (node.nodeValue || "").replace(raw, ZH_DICT[raw]);
-		}
-		return;
-	}
-	if (node.nodeType !== Node.ELEMENT_NODE) return;
-	const el = node as HTMLElement;
-	if (["SCRIPT", "STYLE", "CODE", "PRE", "TEXTAREA"].includes(el.tagName)) return;
-	for (const attr of ATTRS) {
-		const v = el.getAttribute(attr);
-		if (v && ZH_DICT[v]) el.setAttribute(attr, ZH_DICT[v]);
-	}
+ const el = node.nodeType === Node.ELEMENT_NODE ? node as HTMLElement : node.parentElement;
+ if(skipTranslation(el))return;
+ if(node.nodeType===Node.TEXT_NODE){const raw=node.nodeValue||"",translated=translateText(raw);if(raw!==translated)node.nodeValue=translated;return;}
+ if(node.nodeType!==Node.ELEMENT_NODE||!el)return;
+ for(const attr of ATTRS){const raw=el.getAttribute(attr);if(raw){const translated=translateText(raw);if(raw!==translated)el.setAttribute(attr,translated);}}
 }
-
 function walk(root: Node) {
-	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-	// 两遍：先文本后元素属性（TreeWalker 组合过滤时元素也会经过，translateNode 自行分流）
-	while (walker.nextNode()) translateNode(walker.currentNode);
+ const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{acceptNode:node=>skipTranslation(node.nodeType===Node.ELEMENT_NODE?node as Element:node.parentElement)?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT});
+ while(walker.nextNode())translateNode(walker.currentNode);
 }
 
 export function ChineseLocalizer() {
@@ -44,6 +33,7 @@ export function ChineseLocalizer() {
 
 	useEffect(() => {
 		let active = true;
+        document.documentElement.lang = "zh-CN";
 
 		const scheduleWalk = () => {
 			if (dirtyRef.current) return;
@@ -66,6 +56,8 @@ export function ChineseLocalizer() {
 				childList: true,
 				subtree: true,
 				characterData: true,
+                    attributes: true,
+                    attributeFilter: ATTRS,
 			});
 		};
 

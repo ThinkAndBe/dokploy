@@ -1,3 +1,4 @@
+import {productionWebConfig} from '@dokploy/server/lib/production-mode';
 import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "node:crypto";
 import {
@@ -26,11 +27,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 		req.headers.host ||
 		"localhost:3000";
 	const redirectUri =
+        (productionWebConfig().secure ? productionWebConfig().origin+"/api/auth/atrust/callback" : undefined) ||
 		process.env.ATRUST_CALLBACK_URL ||
 		`${proto}://${host}/api/auth/atrust/callback`;
 
 	res.setHeader("Set-Cookie", [
-		`${STATE_COOKIE}=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=300`,
+		`${STATE_COOKIE}=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=300${productionWebConfig().cookieSuffix}`,
 	]);
 	res.redirect(302, atrustAuthorizeUrl(redirectUri, state));
 }

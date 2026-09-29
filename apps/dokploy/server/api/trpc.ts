@@ -1,3 +1,4 @@
+import {guardNativeMutation} from "@dokploy/server/services/release-policy";
 /**
  * YOU PROBABLY DON'T NEED TO EDIT THIS FILE, UNLESS:
  * 1. You want to modify request context (see Part 1).
@@ -148,7 +149,16 @@ export const createTRPCRouter = t.router;
  * guarantee that a user querying is authorized, but you can still access user session data if they
  * are logged in.
  */
-export const publicProcedure = t.procedure;
+const scopedProcedure=t.procedure.use(({ctx,next,path})=>{
+ const scope=(ctx.user as any)?.apphubScope;
+ const allowed:Record<string,string[]>={
+  'version-management':['project.workspace','project.repositoryVersions','project.createVersion'],
+  'release-planning':['release.catalog','release.list','release.detail','release.submit','project.workspace','project.repositoryVersions','project.serviceHandoff']
+ };
+ if(scope&&(!allowed[scope]||!allowed[scope]!.includes(path)))throw new TRPCError({code:'FORBIDDEN',message:'此专用密钥未获授权调用该接口'});
+ return next();
+});
+export const publicProcedure = scopedProcedure;
 
 /**
  * Protected (authenticated) procedure
@@ -158,10 +168,16 @@ export const publicProcedure = t.procedure;
  *
  * @see https://trpc.io/docs/procedures
  */
-export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+export const protectedProcedure = scopedProcedure.use(({ ctx, next, path, type }) => {
 	if (!ctx.session || !ctx.user) {
 		throw new TRPCError({ code: "UNAUTHORIZED" });
 	}
+ const versionKey=(ctx.user as any).apphubScope==='version-management';
+ if(versionKey&&!['project.workspace','project.repositoryVersions','project.createVersion'].includes(path))throw new TRPCError({code:'FORBIDDEN',message:'版本密钥只能读取项目与版本、建立版本，不能部署、审批或读取密码'});
+ const planning=(ctx.user as any).apphubScope==='release-planning';
+ if(planning&&!['release.catalog','release.list','release.detail','release.submit','project.workspace','project.repositoryVersions','project.serviceHandoff'].includes(path))throw new TRPCError({code:'FORBIDDEN',message:'此密钥仅可查询和提交配置方案，不能执行部署、审批或读取密钥'});
+ try{guardNativeMutation(!!process.env.APPHUB_RELEASE_POLICY_FILE,ctx.user.role,ctx.req.headers['x-api-key'],path,type);}catch(e){throw new TRPCError({code:'FORBIDDEN',message:e instanceof Error?e.message:'请使用配置方案流程'});}
+
 	return next({
 		ctx: {
 			// infers the `session` as non-nullable
@@ -172,7 +188,7 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
 	});
 });
 
-export const cliProcedure = t.procedure.use(({ ctx, next }) => {
+export const cliProcedure = scopedProcedure.use(({ ctx, next }) => {
 	if (
 		!ctx.session ||
 		!ctx.user ||
@@ -190,7 +206,7 @@ export const cliProcedure = t.procedure.use(({ ctx, next }) => {
 	});
 });
 
-export const adminProcedure = t.procedure.use(({ ctx, next }) => {
+export const adminProcedure = scopedProcedure.use(({ ctx, next }) => {
 	if (
 		!ctx.session ||
 		!ctx.user ||
@@ -213,7 +229,7 @@ export const adminProcedure = t.procedure.use(({ ctx, next }) => {
  * Does NOT call the license server on every request; full validation (haveValidLicenseKey)
  * is used in the UI gate and when activating/validating keys.
  */
-export const enterpriseProcedure = t.procedure.use(async ({ ctx, next }) => {
+export const enterpriseProcedure = scopedProcedure.use(async ({ ctx, next }) => {
 	if (
 		!ctx.session ||
 		!ctx.user ||

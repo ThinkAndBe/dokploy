@@ -73,6 +73,7 @@ void app.prepare().then(async () => {
 			console.log("Starting Deployment Worker");
 			const { startDeploymentWorker } = await import("./queues/queueSetup");
 			await startDeploymentWorker();
+            if(process.env.APPHUB_RELEASE_POLICY_FILE){const {startReleaseWorker}=await import("@dokploy/server/services/release-worker");startReleaseWorker();}
 		}
 	} catch (e) {
 		console.error("Main Server Error", e);

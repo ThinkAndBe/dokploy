@@ -4,6 +4,8 @@ import type { GetServerSidePropsContext } from "next";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
 import superjson from "superjson";
+import { useRouter } from "next/router";
+import { AppHubWorkspace } from "@/components/dashboard/home/workspace";
 import { ShowHome } from "@/components/dashboard/home/show-home";
 import {
 	clearOnboardingActive,
@@ -15,7 +17,7 @@ import { DashboardLayout } from "@/components/layouts/dashboard-layout";
 import { appRouter } from "@/server/api/root";
 import { api } from "@/utils/api";
 
-const Home = () => {
+const OperationsHome = () => {
 	const { data } = api.project.onboardingStatus.useQuery();
 	const utils = api.useUtils();
 	const { mutateAsync: completeOnboarding } =
@@ -46,6 +48,10 @@ const Home = () => {
 	return <ShowHome />;
 };
 
+const Home = () => {
+ const router=useRouter(); const {data:auth}=api.user.get.useQuery();
+ return router.query.view==='operations' && (auth?.role==='owner'||auth?.role==='admin') ? <OperationsHome/> : <AppHubWorkspace/>;
+};
 export default Home;
 
 Home.getLayout = (page: ReactElement) => {

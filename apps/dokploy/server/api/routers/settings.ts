@@ -1,3 +1,4 @@
+import { requireGlobalDockerCleanup } from "@dokploy/server/services/apphub-policy";
 import {
 	CLEANUP_CRON_JOB,
 	checkGPUStatus,
@@ -328,6 +329,7 @@ export const settingsRouter = createTRPCRouter({
 	updateDockerCleanup: adminProcedure
 		.input(apiUpdateDockerCleanup)
 		.mutation(async ({ input, ctx }) => {
+			if (input.enableDockerCleanup) requireGlobalDockerCleanup();
 			if (input.serverId) {
 				await updateServerById(input.serverId, {
 					enableDockerCleanup: input.enableDockerCleanup,

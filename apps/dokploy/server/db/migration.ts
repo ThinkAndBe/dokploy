@@ -13,7 +13,8 @@ export const migration = async () =>
 			sql.end();
 		})
 		.catch((error) => {
-			console.log("Migration failed", error);
+			console.error("Migration failed", error);
+		process.exitCode = 1;
 		})
 		.finally(() => {
 			sql.end();

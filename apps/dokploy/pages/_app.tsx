@@ -1,12 +1,15 @@
 import "@/styles/globals.css";
 
+import { setDefaultOptions } from "date-fns";
+import { zhCN } from "date-fns/locale";
+setDefaultOptions({locale:zhCN});
+
 import type { NextPage } from "next";
 import type { AppProps } from "next/app";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import NextTopLoader from "nextjs-toploader";
 import type { ReactElement, ReactNode } from "react";
-import { SearchCommand } from "@/components/dashboard/search-command";
 import { ChineseLocalizer } from "@/components/i18n-zh/ChineseLocalizer";
 import { Analytics } from "@/components/shared/analytics";
 import { Toaster } from "@/components/ui/sonner";
@@ -51,7 +54,6 @@ const MyApp = ({
 				<ChineseLocalizer />
 					<Analytics />
 					<Toaster richColors />
-					<SearchCommand />
 					{getLayout(<Component {...pageProps} />)}
 				</ThemeProvider>
 			</TooltipProvider>

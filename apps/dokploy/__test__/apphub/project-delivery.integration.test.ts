@@ -1,0 +1,36 @@
+import {describe,it,expect,beforeAll,afterAll,vi} from 'vitest';
+import {readFileSync} from 'node:fs';
+vi.mock('../../../../packages/server/src/services/release-policy',async importOriginal=>({...await importOriginal<any>(),releaseTargets:async()=>[{organizationId:'o',projectId:'p',environmentId:'test',tier:'test'}]}));
+vi.mock('../../../../packages/server/src/services/release-service',()=>({accessiblePlan:async(a:any,id:string)=>{if(a.id==='outsider')throw new Error('未授权');return {plan:{id,project_id:'p',tier:'test',status:id==='failed'?'failed':'deployed'}};}}));
+vi.mock('../../../../packages/server/src/services/permission',()=>({findMemberByUserId:async(id:string)=>({role:id==='admin'?'admin':'member',accessedProjects:id==='outsider'?[]:['p']})}));
+import {releaseSql as sql} from '../../../../packages/server/src/services/release-store';
+import {initializeProjectOwner,sharingDetails,changeSharing} from '../../../../packages/server/src/services/project-sharing';
+import {requestPublish,reviewPublish,publishRequests} from '../../../../packages/server/src/services/publish-request';
+const actor=(id:string)=>({id,organizationId:'o'});
+describe.skipIf(process.env.APPHUB_SHARING_DB_TEST!=='true')('Project delivery isolation',()=>{
+ beforeAll(async()=>{
+  await sql.unsafe(`CREATE TABLE organization(id text primary key); CREATE TABLE "user"(id text primary key,"firstName" text,"lastName" text,email text); CREATE TABLE project("projectId" text primary key,"organizationId" text,name text); CREATE TABLE member(id text primary key,user_id text,organization_id text,role text,"accesedProjects" text[] default '{}',"accessedEnvironments" text[] default '{}',"accesedServices" text[] default '{}'); CREATE TABLE environment("environmentId" text,"projectId" text); CREATE TABLE compose("composeId" text,"environmentId" text); CREATE TABLE application("applicationId" text,"environmentId" text);`);
+  for(const table of ['postgres','mysql','mariadb','mongo','redis','libsql'])await sql.unsafe('CREATE TABLE "'+table+'"("'+table+'Id" text,"environmentId" text)');
+  await sql.unsafe(readFileSync(new URL('../../drizzle/0197_apphub_release_flow.sql',import.meta.url),'utf8').replaceAll('--> statement-breakpoint',''));
+  await sql.unsafe(readFileSync(new URL('../../drizzle/0198_apphub_project_delivery.sql',import.meta.url),'utf8').replaceAll('--> statement-breakpoint',''));
+  await sql`insert into organization values('o'),('other')`;
+  for(const id of ['owner','collab','next','outsider','admin','foreign'])await sql`insert into "user" values(${id},${id},'',${id+'@example.test'})`;
+  await sql`insert into project values('p','o','Project'),('another','o','Other')`;
+  for(const id of ['owner','collab','next','outsider','admin','foreign'])await sql`insert into member(id,user_id,organization_id,role) values(${id},${id},${id==='foreign'?'other':'o'},${id==='admin'?'admin':'member'})`;
+  await sql`update member set "accesedProjects"=ARRAY['p','another'],"accessedEnvironments"=ARRAY['test','otherenv'],"accesedServices"=ARRAY['test-service','other-service'] where id in ('owner','collab')`;
+  await sql`insert into environment values('test','p'),('formal','p'),('otherenv','another')`;
+  await sql`insert into compose values('test-service','test'),('prod-service','formal'),('other-service','otherenv')`;
+  await initializeProjectOwner(actor('owner'),'p');
+  await sql`insert into apphub_release_plan(id,organization_id,project_id,environment_id,created_by,title,tier,status,plan_hash,base_hash,idempotency_key,payload) values('passed','o','p','test','owner','Test','test','deployed','h','b','key','{"input":{"configuration":{"image":"demo"}}}')`;
+ });
+ afterAll(async()=>{await sql.end();});
+ it('collaborator cannot grant access or transfer',async()=>{await expect(changeSharing(actor('collab'),{projectId:'p',userId:'next',action:'grant',keepPrevious:false})).rejects.toThrow('负责人');});
+ it('rejects cross-organization targets without changing ownership',async()=>{await expect(changeSharing(actor('owner'),{projectId:'p',userId:'foreign',action:'transfer',keepPrevious:false})).rejects.toThrow('组织');expect((await sharingDetails(actor('owner'),'p')).ownerId).toBe('owner');});
+ it('grants only test resources and never production',async()=>{await changeSharing(actor('owner'),{projectId:'p',userId:'next',action:'grant',keepPrevious:false});const [m]=await sql`select * from member where id='next'`;expect(m!.accesedProjects).toEqual(['p']);expect(m!.accessedEnvironments).toEqual(['test']);expect(m!.accesedServices).toEqual(['test-service']);});
+ it('revocation immediately removes project access',async()=>{await changeSharing(actor('owner'),{projectId:'p',userId:'next',action:'revoke',keepPrevious:false});await expect(sharingDetails(actor('next'),'p')).rejects.toThrow('未授权');});
+ it('cannot revoke owner or manage sharing with an API token',async()=>{await expect(changeSharing(actor('owner'),{projectId:'p',userId:'owner',action:'revoke',keepPrevious:false})).rejects.toThrow('移交');await expect(changeSharing({...actor('owner'),apiKey:'token'},{projectId:'p',userId:'next',action:'grant',keepPrevious:false})).rejects.toThrow('页面');});
+ it('publishing request is idempotent and does not queue deployment',async()=>{const results=await Promise.all([requestPublish(actor('owner'),'passed','tested'),requestPublish(actor('owner'),'passed','tested')]);expect(results[0]!.id).toBe(results[1]!.id);const [p]=await sql`select status from apphub_release_plan where id='passed'`;expect(p!.status).toBe('deployed');expect((await publishRequests(actor('outsider')))).toHaveLength(0);});
+ it('rejects untested releases and non-admin handling',async()=>{await expect(requestPublish(actor('owner'),'failed','test')).rejects.toThrow('完成测试');const [r]=await sql`select id from apphub_publish_request`;await expect(reviewPublish(actor('collab'),r!.id,'processing','take')).rejects.toThrow('管理员');await reviewPublish(actor('admin'),r!.id,'processing','take');});
+ it('transfer revokes old project authority but preserves other projects',async()=>{await changeSharing(actor('owner'),{projectId:'p',userId:'next',action:'transfer',keepPrevious:false});const [old]=await sql`select * from member where id='owner'`;expect(old!.accesedProjects).toEqual(['another']);expect(old!.accesedServices).toEqual(['other-service']);expect((await sharingDetails(actor('next'),'p')).ownerId).toBe('next');await expect(changeSharing(actor('owner'),{projectId:'p',userId:'collab',action:'grant',keepPrevious:false})).rejects.toThrow();});
+ it('transfer may retain previous owner as collaborator',async()=>{await changeSharing(actor('next'),{projectId:'p',userId:'collab',action:'transfer',keepPrevious:true});expect((await sharingDetails(actor('next'),'p')).canManage).toBe(false);expect((await sharingDetails(actor('collab'),'p')).ownerId).toBe('collab');});
+});

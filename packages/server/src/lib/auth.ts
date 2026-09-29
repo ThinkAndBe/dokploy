@@ -1,3 +1,4 @@
+import {productionWebConfig} from './production-mode';
 import type { IncomingMessage } from "node:http";
 import { apiKey } from "@better-auth/api-key";
 import { passkey } from "@better-auth/passkey";
@@ -56,6 +57,7 @@ const resolveTrustedOrigins = async () => {
 			...(settings?.host ? [`https://${settings?.host}`] : []),
 			...devOrigins,
 			...trustedOrigins,
+            ...(productionWebConfig().origin?[productionWebConfig().origin!]:[]),
 		];
 	} catch (error) {
 		console.error("Failed to resolve trusted origins:", error);
@@ -77,16 +79,17 @@ const createBetterAuth = () =>
 			...(!IS_CLOUD ? ["/verify-email"] : []),
 		],
 		secret: betterAuthSecret,
+        ...(productionWebConfig().origin?{baseURL:productionWebConfig().origin}:{}),
 		onAPIError: {
 			errorURL: "/",
 		},
 		...(!IS_CLOUD
 			? {
 					advanced: {
-						useSecureCookies: false,
+						useSecureCookies: productionWebConfig().secure,
 						defaultCookieAttributes: {
 							sameSite: "lax",
-							secure: false,
+							secure: productionWebConfig().secure,
 							httpOnly: true,
 							path: "/",
 						},
@@ -605,6 +608,7 @@ export const validateRequest = async (request: IncomingMessage) => {
 					twoFactorEnabled: userFromDb.twoFactorEnabled,
 					role: member?.role || "member",
 					ownerId: member?.organization.ownerId || apiKeyRecord.user.id,
+                    apphubScope: (JSON.parse(apiKeyRecord.metadata || '{}') as {apphubScope?:string}).apphubScope,
 					enableEnterpriseFeatures: userFromDb.enableEnterpriseFeatures,
 					isValidEnterpriseLicense: userFromDb.isValidEnterpriseLicense,
 				},

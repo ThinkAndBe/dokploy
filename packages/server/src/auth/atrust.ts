@@ -1,3 +1,5 @@
+import {productionWebConfig} from '../lib/production-mode';
+import {readSecret} from '../db/constants';
 import crypto from "node:crypto";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
@@ -33,7 +35,7 @@ export const getATrustConfig = (): ATrustSSOConfig => ({
 		process.env.ATRUST_API_SERVER || process.env.ATRUST_SSO_SERVER || ""
 	).replace(/\/+$/, ""),
 	appId: process.env.ATRUST_APPID || "",
-	appSecret: process.env.ATRUST_APPSECRET || "",
+	appSecret: process.env.ATRUST_APPSECRET_FILE ? readSecret(process.env.ATRUST_APPSECRET_FILE) : process.env.ATRUST_APPSECRET || "",
 });
 
 export const isATrustConfigured = (): boolean => {
@@ -104,7 +106,7 @@ export async function atrustGetUserByCode(code: string): Promise<ATrustUserInfo>
 export const atrustEmail = (employeeId: string) =>
 	`${employeeId}@atrust.apphub`;
 
-export const ATRUST_SESSION_COOKIE = "better-auth.session_token";
+export const ATRUST_SESSION_COOKIE = productionWebConfig().sessionCookie;
 
 /**
  * better-auth 的会话 cookie 值带签名：`${token}.${base64(HMAC-SHA256(secret, token))}`

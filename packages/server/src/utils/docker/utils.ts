@@ -1,3 +1,4 @@
+import { requireGlobalDockerCleanup } from "@dokploy/server/services/apphub-policy";
 import fs from "node:fs";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -190,6 +191,7 @@ const cleanupCommands = {
 };
 
 export const cleanupContainers = async (serverId?: string) => {
+	requireGlobalDockerCleanup();
 	try {
 		const command = cleanupCommands.containers;
 
@@ -206,6 +208,7 @@ export const cleanupContainers = async (serverId?: string) => {
 };
 
 export const cleanupImages = async (serverId?: string) => {
+	requireGlobalDockerCleanup();
 	try {
 		const command = cleanupCommands.images;
 
@@ -220,6 +223,7 @@ export const cleanupImages = async (serverId?: string) => {
 };
 
 export const cleanupVolumes = async (serverId?: string) => {
+	requireGlobalDockerCleanup();
 	try {
 		const command = cleanupCommands.volumes;
 
@@ -236,6 +240,7 @@ export const cleanupVolumes = async (serverId?: string) => {
 };
 
 export const cleanupBuilders = async (serverId?: string) => {
+	requireGlobalDockerCleanup();
 	try {
 		const command = cleanupCommands.builders;
 
@@ -252,6 +257,7 @@ export const cleanupBuilders = async (serverId?: string) => {
 };
 
 export const cleanupSystem = async (serverId?: string) => {
+	requireGlobalDockerCleanup();
 	try {
 		const command = cleanupCommands.system;
 
@@ -366,6 +372,7 @@ const excludedCleanupAllCommands: (keyof typeof cleanupCommands)[] = [
 ];
 
 export const cleanupAll = async (serverId?: string) => {
+	requireGlobalDockerCleanup();
 	for (const [key, command] of Object.entries(cleanupCommands) as [
 		keyof typeof cleanupCommands,
 		string,
@@ -388,6 +395,7 @@ export const cleanupAll = async (serverId?: string) => {
 };
 
 export const cleanupAllBackground = async (serverId?: string) => {
+	requireGlobalDockerCleanup();
 	Promise.allSettled(
 		(
 			Object.entries(cleanupCommands) as [

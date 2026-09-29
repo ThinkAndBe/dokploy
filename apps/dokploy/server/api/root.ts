@@ -1,3 +1,4 @@
+import {releaseRouter} from "./routers/release";
 import { createTRPCRouter } from "../api/trpc";
 import { adminRouter } from "./routers/admin";
 import { aiRouter } from "./routers/ai";
@@ -63,6 +64,7 @@ import { volumeBackupsRouter } from "./routers/volume-backups";
  */
 
 export const appRouter = createTRPCRouter({
+ release:releaseRouter,
 	admin: adminRouter,
 	application: applicationRouter,
 	backup: backupRouter,

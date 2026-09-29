@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { TruncateTooltip } from "@/components/shared/truncate-tooltip";
@@ -166,9 +167,11 @@ type Menu = {
 // The `isEnabled` function is called to determine if the item should be displayed
 const MENU: Menu = {
 	home: [
-		{
+		{title:"上线审批与发布",url:"/dashboard/releases?mode=operations",icon:ClipboardList,isSingle:true},
+        {title:"数据库与连接池",url:"/dashboard/databases",icon:ClipboardList,isSingle:true},
+        {
 			isSingle: true,
-			title: "Home",
+			title: "我的工作台",
 			url: "/dashboard/home",
 			icon: House,
 		},
@@ -464,6 +467,7 @@ const MENU: Menu = {
  * @returns a menu object with the home, settings, and help items
  */
 function createMenuForAuthUser(opts: {
+ advanced?: boolean;
 	auth?: AuthQueryOutput;
 	permissions?: PermissionsOutput;
 	isCloud: boolean;
@@ -500,9 +504,14 @@ function createMenuForAuthUser(opts: {
 		return item;
 	});
 
+ if(!opts.advanced){
+  const admin=opts.auth?.role==='owner'||opts.auth?.role==='admin';
+  return {home:[{title:'我的项目',url:'/dashboard/home',icon:House},{title:'测试记录与上线申请',url:'/dashboard/releases',icon:ClipboardList},{title:'数据库',url:'/dashboard/databases',icon:HardDrive},{title:'版本管理接口',url:'/dashboard/version-api',icon:GitBranch},...(admin?[{title:'管理后台',url:'/dashboard/home?view=operations',icon:ShieldCheck}]:[])],settings:filterEnabled(MENU.settings).filter(item=>item.isSingle!==false&&['/dashboard/settings/profile','/dashboard/settings/sessions'].includes(item.url)),help:[]};
+ }
+
 	return {
-		home: filterEnabled(MENU.home),
-		settings: filterEnabled(MENU.settings),
+		home: filterEnabled(MENU.home).filter(item => opts.auth?.role === "owner" || opts.auth?.role === "admin" || (item.isSingle !== false && ["/dashboard/home", "/dashboard/projects", "/dashboard/releases", "/dashboard/databases"].includes(item.url))),
+		settings: filterEnabled(MENU.settings).filter(item => opts.auth?.role === "owner" || opts.auth?.role === "admin" || (item.isSingle !== false && ["/dashboard/settings/profile", "/dashboard/settings/sessions"].includes(item.url))),
 		help: helpItems,
 	};
 }
@@ -953,7 +962,10 @@ export default function Page({ children }: Props) {
 		refetchOnWindowFocus: false,
 	});
 
-	const includesProjects = pathname?.includes("/dashboard/project");
+	const router=useRouter();
+ const simplePaths=['/dashboard/home','/dashboard/releases','/dashboard/databases','/dashboard/version-api','/dashboard/settings/profile','/dashboard/settings/sessions'];
+ const advanced=(auth?.role==='owner'||auth?.role==='admin')&&(router.query.view==='operations'||router.query.mode==='operations'||!simplePaths.includes(pathname||''));
+ const includesProjects = pathname?.includes("/dashboard/project");
 	const { data: isCloud } = api.settings.isCloud.useQuery();
 
 	const {
@@ -961,6 +973,7 @@ export default function Page({ children }: Props) {
 		settings: filteredSettings,
 		help,
 	} = createMenuForAuthUser({
+        advanced,
 		auth,
 		permissions,
 		isCloud: !!isCloud,

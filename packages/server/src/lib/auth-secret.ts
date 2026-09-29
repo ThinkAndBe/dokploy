@@ -22,6 +22,7 @@ Please migrate to Docker Secrets:
   curl -sSL https://dokploy.com/security/0.29.3.sh | bash
 `);
 	}
+	if(process.env.APPHUB_REQUIRE_HTTPS==='true')throw new Error('生产环境必须提供独立的 BETTER_AUTH_SECRET_FILE');
 	return HARDCODED_LEGACY_SECRET;
 }
 

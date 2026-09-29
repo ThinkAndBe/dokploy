@@ -26,6 +26,7 @@ if (DATABASE_URL) {
 		password,
 	)}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}`;
 } else {
+    if(process.env.APPHUB_REQUIRE_HTTPS==='true')throw new Error('生产环境必须提供独立数据库凭据');
 	if (process.env.NODE_ENV !== "test") {
 		console.warn(`
 		⚠️  [DEPRECATED DATABASE CONFIG]
