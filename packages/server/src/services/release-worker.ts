@@ -47,7 +47,8 @@ async function execute(p:Plan){
   if(c.kind==='web')await checkNewPort(c.publishedPort);else await prepareDatabase(p);
   await db.insert(compose).values({composeId:p.service_id,name:p.payload.serviceName,environmentId:p.environment_id,appName:'apphubrel-'+p.id.replaceAll('-','').slice(0,16),composeFile:p.payload.compose,sourceType:'raw',composeType:'stack',autoDeploy:false,env:'',command:'',serviceNetworks:(c.kind==='database'?['database','pool']:['app']).map(serviceName=>({serviceName,networkIds:[],detachDokployNetwork:true}))});
   current=await db.query.compose.findFirst({where:eq(compose.composeId,p.service_id),with:{domains:true,mounts:true}});
-  if(p.tier==='test')await releaseSql`update member set "accesedServices"=array_append("accesedServices",${p.service_id}) where organization_id=${p.organization_id} and ${p.project_id}=any("accesedProjects") and ${p.environment_id}=any("accessedEnvironments") and not ${p.service_id}=any("accesedServices")`;
+  const m=await findMemberByUserId(p.created_by,p.organization_id);
+  await db.update(member).set({accessedServices:Array.from(new Set([...m.accessedServices,p.service_id]))}).where(eq(member.id,m.id));
  }else{
   if(!current||composeFingerprint(current)!==p.base_hash)throw new Error('部署前配置发生变化，未执行');
   await db.update(compose).set({composeFile:p.payload.compose}).where(eq(compose.composeId,p.service_id));

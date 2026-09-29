@@ -1,4 +1,3 @@
-import {readHandoff} from "./apphub-handoff";
 import {latestHandoffs} from "./release-store";
 import { db } from "@dokploy/server/db";
 import { projects } from "@dokploy/server/db/schema";
@@ -20,13 +19,11 @@ export async function projectWorkspace(userId: string, organizationId: string) {
  const released=process.env.APPHUB_RELEASE_POLICY_FILE?await latestHandoffs(organizationId):{};
  let urls:Record<string,unknown>={};
  try { const parsed=JSON.parse(process.env.APPHUB_SERVICE_URLS || "{}"); if(parsed && typeof parsed==='object' && !Array.isArray(parsed)) urls=parsed; } catch { /* Invalid optional links must not prevent viewing projects. */ }
- const handoffUrls:Record<string,string|null>={};
- await Promise.all(rows.flatMap(p=>p.environments.filter(e=>scope.environment(e.environmentId)).flatMap(e=>[...e.applications.map(s=>s.applicationId),...e.compose.map(s=>s.composeId)].filter(id=>scope.service(id)))).map(async id=>{try{handoffUrls[id]=safeAppUrl((await readHandoff(id))?.loginUrl);}catch{handoffUrls[id]=null;}}));
  return rows.map(p=>({...p,environments:p.environments.filter(e=>scope.environment(e.environmentId)).map(e=>({environmentId:e.environmentId,name:e.name,services:[
   ...e.applications.map(s=>({...s,id:s.applicationId,type:"application" as const,status:s.applicationStatus})),
   ...e.compose.map(s=>({...s,id:s.composeId,type:"compose" as const,status:s.composeStatus}))
  ].filter(s=>scope.service(s.id)).map(s=>({id:s.id,name:s.name,type:s.type,status:s.status,latestDeployment:s.deployments[0]??null,
-  url:safeAppUrl(released[s.id]?.loginUrl)??safeAppUrl(urls[s.id])??handoffUrls[s.id]??s.domains.filter(d=>d.enabled).map(d=>safeAppUrl(`${d.https?'https':'http'}://${d.host}${d.path||'/'}`)).find(Boolean)??null,
+  url:safeAppUrl(released[s.id]?.loginUrl)??safeAppUrl(urls[s.id])??s.domains.filter(d=>d.enabled).map(d=>safeAppUrl(`${d.https?'https':'http'}://${d.host}${d.path||'/'}`)).find(Boolean)??null,
   path:`/dashboard/project/${encodeURIComponent(p.projectId)}/environment/${encodeURIComponent(e.environmentId)}/services/${s.type}/${encodeURIComponent(s.id)}`
  }))}))}));
 }

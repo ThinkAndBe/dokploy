@@ -33,8 +33,6 @@ export function requireInteractive(apiKey:unknown){if(apiKey)throw new Error('�
 export function requireReviewer(role:string,author:string,reviewer:string){if(!['owner','admin'].includes(role)||author===reviewer)throw new Error('正式发布必须由另一位运维管理员审批');}
 export function guardNativeMutation(enabled:boolean,role:string,apiKey:unknown,path:string,type:string){
  if(!enabled||type!=='mutation')return;
- if(['project.createVersion','project.createVersionKey'].includes(path))return;
- if(!apiKey&&['project.create','project.changeSharing'].includes(path))return;
  const resources=new Set(['compose','application','environment','project','domain','mounts','port','redirects','security','schedule','rollbacks','previewDeployment','volumeBackups','backup','postgres','mysql','mariadb','mongo','redis','libsql']);
  if(resources.has(path.split('.')[0]!)&&(apiKey||!['owner','admin'].includes(role)))throw new Error('该平台已启用配置方案流程，请提交发布方案并在页面确认；不能绕过审批直接修改部署');
 }

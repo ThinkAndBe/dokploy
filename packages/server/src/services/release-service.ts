@@ -34,7 +34,7 @@ async function testedSource(a:Actor,input:ReleaseInput,t:ReleaseTarget){
  if(!p||p.project_id!==t.projectId||p.environment_id!==t.testEnvironmentId||p.tier!=='test'||p.status!=='deployed'||p.payload.input.configuration.image!==input.configuration.image||p.payload.input.configuration.kind!==input.configuration.kind||(input.configuration.kind==='database'&&(p.payload.input.configuration.engine!==input.configuration.engine||p.payload.input.configuration.poolImage!==input.configuration.poolImage)))throw new Error('测试方案未通过或镜像摘要与正式方案不一致');
 }
 export async function submitPlan(a:Actor,raw:unknown){
- const input=releaseInput.parse(raw),{target:t,member:m,admin}=await authorizeTarget(a,input.environmentId);if(t.tier==='formal'&&!admin)throw new Error('生产发布由管理员处理，请从已完成的测试版本提交上线申请');validateConfiguration(input.configuration,t);await testedSource(a,input,t);
+ const input=releaseInput.parse(raw),{target:t,member:m,admin}=await authorizeTarget(a,input.environmentId);validateConfiguration(input.configuration,t);await testedSource(a,input,t);
  const id=randomUUID(),c=input.configuration;let baseHash='new',serviceId='rel-'+id;let document:any;let diff:any[]=[];let handoff:any;let serviceName=input.title;
  if(c.kind==='update'){
   if(t.tier==='test'&&!admin&&!m.accessedServices.includes(c.serviceId))throw new Error('没有目标应用权限');

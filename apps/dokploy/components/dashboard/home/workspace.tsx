@@ -1,26 +1,21 @@
-import { ProjectSharing } from '../projects/sharing';
-import { ServiceHandoff } from '../projects/handoff';
-import Link from 'next/link';
-import { useState } from 'react';
-import { api } from '@/utils/api';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { HandleProject } from '../projects/handle-project';
-import { ProjectVersions } from '../projects/versions';
-const statusText:Record<string,string>={done:'最近部署成功',running:'正在部署',error:'部署失败',idle:'尚未部署',cancelled:'已取消'};
+import {ServiceHandoff} from "../projects/handoff";
+import Link from "next/link";
+import { useState } from "react";
+import { api } from "@/utils/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { HandleProject } from "../projects/handle-project";
+import { ProjectVersions } from "../projects/versions";
+const statusText:Record<string,string>={done:"最近部署成功",running:"正在部署",error:"部署失败",idle:"尚未部署",cancelled:"已取消"};
 export function AppHubWorkspace(){
  const q=api.project.workspace.useQuery(undefined,{refetchInterval:15000});
  const {data:auth}=api.user.get.useQuery(),{data:permissions}=api.user.getPermissions.useQuery();
  const [search,setSearch]=useState('');const admin=auth?.role==='owner'||auth?.role==='admin';
  const rows=q.data?.filter(p=>(p.name+' '+(p.description||'')).toLowerCase().includes(search.toLowerCase()))??[];
- return <main className="p-4 md:p-8 space-y-6 max-w-6xl mx-auto w-full">
- <header className="flex flex-wrap justify-between gap-4"><div><h1 className="text-3xl font-semibold">我的项目</h1><p className="text-muted-foreground mt-2">管理版本 → 沙箱测试 → 申请上线。测试直接执行，上线由管理员处理。</p></div><div className="flex items-center gap-2">{permissions?.project.create&&<HandleProject/>}{admin&&<Button variant="outline" asChild><Link href="/dashboard/home?view=operations">管理后台</Link></Button>}</div></header>
- <div className="flex items-center gap-3"><Input aria-label="搜索我的项目" placeholder="搜索项目" value={search} onChange={e=>setSearch(e.target.value)} className="max-w-md"/><Button variant="outline" onClick={()=>void q.refetch()} disabled={q.isFetching}>刷新</Button></div>
- {q.isPending?<p>正在加载项目…</p>:q.error?<p role="alert">暂时无法读取项目，请刷新重试。</p>:rows.length===0?<div className="rounded-xl border p-10 text-center"><h2>暂无项目</h2><p className="text-muted-foreground mt-2">创建一个项目开始，或请项目负责人邀请你加入。</p></div>:rows.map(p=>{
- const services=p.environments.flatMap(e=>e.services);
- return <section className="rounded-xl border bg-card" key={p.projectId}><div className="p-6 space-y-4"><div><h2 className="text-xl font-semibold" translate="no">{p.name}</h2>{p.description&&<p className="text-sm text-muted-foreground mt-1" translate="no">{p.description}</p>}</div>
- <div className="flex flex-wrap gap-2"><ProjectVersions projectId={p.projectId}/><Button size="sm" asChild><Link href={`/dashboard/releases?projectId=${p.projectId}`}>开始测试</Link></Button><Button size="sm" variant="outline" asChild><Link href={`/dashboard/releases?projectId=${p.projectId}&intent=publish`}>申请上线</Link></Button><ProjectSharing projectId={p.projectId}/></div>
- {services.length===0?<p className="text-sm text-muted-foreground">还没有部署记录。从版本管理开始，准备好后进行测试。</p>:<div className="space-y-2">{services.map(s=><div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 p-4" key={s.id}><div><p className="font-medium" translate="no">{s.name}</p><p className={`text-sm mt-1 ${s.status==='error'?'text-destructive':'text-muted-foreground'}`}>{statusText[s.status]||'状态待确认'}</p></div><div className="flex flex-wrap gap-2">{s.url?<Button size="sm" asChild><a href={s.url} target="_blank" rel="noopener noreferrer">打开应用</a></Button>:<span className="text-sm text-muted-foreground self-center">访问地址尚未登记</span>}<ServiceHandoff serviceId={s.id}/></div></div>)}</div>}
- </div></section>})}
- </main>;
+ return <div className="p-4 md:p-8 space-y-6 max-w-7xl mx-auto w-full"><header className="flex flex-wrap justify-between gap-4"><div><p className="text-sm text-muted-foreground">APPHUB · 应用交付</p><h1 className="text-3xl font-semibold mt-2">我的工作台</h1><p className="text-muted-foreground mt-2">找到项目，查看版本，打开测试应用并确认部署结果。</p></div><div className="flex items-center gap-2"><Button asChild><Link href="/dashboard/releases">配置与发布</Link></Button><Button variant="outline" asChild><Link href="/dashboard/databases">数据库与连接池</Link></Button>{permissions?.project.create&&<HandleProject/>}{admin&&<Button variant="outline" asChild><Link href="/dashboard/home?view=operations">运维总览</Link></Button>}</div></header>
+ <section className="grid md:grid-cols-3 gap-4">{[['1','准备项目与代码','每个项目独立保存代码和版本历史。'],['2','部署并验证','进入获授权的环境配置代码来源，部署后查看记录并打开应用测试。'],['3','交给运维发布','正式内网及外网发布由运维处理，测试成功不会自动上线。']].map(([n,title,desc])=><div className="rounded-xl border bg-card p-5" key={n}><p className="text-sm text-primary">步骤 {n}</p><h2 className="font-semibold mt-2">{title}</h2><p className="text-sm text-muted-foreground mt-2">{desc}</p></div>)}</section>
+ <div className="flex justify-between items-center gap-4"><Input aria-label="搜索我的项目" placeholder="搜索项目名称或说明" value={search} onChange={e=>setSearch(e.target.value)} className="max-w-md"/><Button variant="outline" onClick={()=>void q.refetch()} disabled={q.isFetching}>刷新状态</Button></div>
+ {q.isPending?<p>正在加载我的项目…</p>:q.error?<div role="alert" className="rounded border p-5">暂时无法读取项目，请刷新重试。{q.error.message}</div>:rows.length===0?<div className="rounded-xl border p-12 text-center"><h2>暂时没有可显示的项目</h2><p className="text-muted-foreground mt-2">可以创建项目，或请运维将项目和测试环境授权给你的账号。</p></div>:rows.map(p=><section className="rounded-xl border bg-card" key={p.projectId}><div className="p-5 flex flex-wrap justify-between gap-3 border-b"><div><h2 className="text-xl font-semibold" translate="no">{p.name}</h2><p className="text-sm text-muted-foreground mt-1" translate="no">{p.description}</p></div><div className="flex items-center gap-2">{p.giteaRepoStatus==='ready'?<ProjectVersions projectId={p.projectId}/>:<span className="text-sm text-muted-foreground">仓库待关联</span>}<Button variant="outline" size="sm" asChild><Link href={p.environments[0]?`/dashboard/project/${p.projectId}/environment/${p.environments[0].environmentId}`:"/dashboard/projects"}>管理项目</Link></Button></div></div>
+ {p.environments.length===0?<p className="p-5 text-muted-foreground">暂无获授权的环境，请联系运维分配。</p>:p.environments.map(e=><div className="p-5 border-b last:border-0" key={e.environmentId}><h3 className="font-semibold mb-3" translate="no">{e.name}</h3>{e.services.length===0?<div className="text-sm text-muted-foreground">此环境暂无可访问的应用。<Link className="text-primary ml-2" href={`/dashboard/project/${p.projectId}/environment/${e.environmentId}`}>进入环境</Link></div>:e.services.map(s=><div className="flex flex-wrap items-center justify-between gap-4 bg-muted/40 rounded-lg p-4 mb-2" key={s.id}><div><p className="font-medium" translate="no">{s.name}</p><p className={`text-sm mt-1 ${s.status==='error'?'text-destructive':'text-muted-foreground'}`}>{statusText[s.status]||'状态待确认'}{s.latestDeployment&&<> · {new Date(s.latestDeployment.createdAt).toLocaleString('zh-CN')}</>}</p>{s.latestDeployment&&<p className="text-xs text-muted-foreground mt-1" translate="no">{s.latestDeployment.title}</p>}<p className="text-xs text-muted-foreground mt-1">部署成功后仍需打开应用确认业务功能。</p></div><div className="flex flex-wrap gap-2"><ServiceHandoff serviceId={s.id}/>{s.url?<Button size="sm" asChild><a href={s.url} target="_blank" rel="noopener noreferrer">打开应用</a></Button>:<span className="text-xs text-muted-foreground self-center">访问地址待运维配置</span>}<Button size="sm" variant="outline" asChild><Link href={s.path+'?tab=deployments'}>部署记录与日志</Link></Button><Button size="sm" variant="outline" asChild><Link href={s.path}>配置与部署</Link></Button></div></div>)}</div>)}
+ </section>)}<p className="text-xs text-muted-foreground">仅显示当前账号获授权的项目、环境和服务。状态每 15 秒刷新；操作权限仍由服务端检查。</p></div>
 }
