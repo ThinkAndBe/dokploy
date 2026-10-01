@@ -515,7 +515,7 @@ function createMenuForAuthUser(opts: {
 
 	return {
 		home: filterEnabled(MENU.home).filter(item => opts.auth?.role === "owner" || opts.auth?.role === "admin" || (item.isSingle !== false && ["/dashboard/home", "/dashboard/projects", "/dashboard/releases"].includes(item.url))),
-		settings: filterEnabled(MENU.settings).filter(item=>item.isSingle===false||!["/dashboard/settings/license","/dashboard/settings/whitelabeling","/dashboard/settings/billing"].includes(item.url)).filter(item => opts.auth?.role === "owner" || opts.auth?.role === "admin" || (item.isSingle !== false && ["/dashboard/settings/profile", "/dashboard/settings/sessions"].includes(item.url))),
+		settings: filterEnabled(MENU.settings).filter(item=>item.isSingle===false||!["/dashboard/settings/profile","/dashboard/settings/sessions","/dashboard/settings/license","/dashboard/settings/whitelabeling","/dashboard/settings/billing"].includes(item.url)).filter(item => opts.auth?.role === "owner" || opts.auth?.role === "admin" || (item.isSingle !== false && ["/dashboard/settings/profile", "/dashboard/settings/sessions"].includes(item.url))),
 		help: [],
 	};
 }
@@ -968,6 +968,7 @@ export default function Page({ children }: Props) {
 
 	const router=useRouter();
  const advanced=navigationArea(auth?.role,pathname||'',router.query)==='operations';
+ const activePath=pathname==='/dashboard/home'&&advanced?pathname+'?view=operations':pathname==='/dashboard/releases'&&advanced?pathname+'?mode=operations':pathname;
  const includesProjects = pathname?.includes("/dashboard/project");
 	const { data: isCloud } = api.settings.isCloud.useQuery();
 
@@ -985,7 +986,7 @@ export default function Page({ children }: Props) {
 
 	const activeItem = findActiveNavItem(
 		[...filteredHome, ...filteredSettings],
-		pathname,
+		activePath,
 	);
 
 	if (!isLoaded) {
@@ -1026,9 +1027,9 @@ export default function Page({ children }: Props) {
 							{filteredHome.map((item) => {
 								const isSingle = item.isSingle !== false;
 								const isActive = isSingle
-									? isActiveRoute({ itemUrl: item.url, pathname })
+									? isActiveRoute({ itemUrl: item.url, pathname:activePath })
 									: item.items.some((item) =>
-											isActiveRoute({ itemUrl: item.url, pathname }),
+											isActiveRoute({ itemUrl: item.url, pathname:activePath }),
 										);
 
 								return (
@@ -1115,9 +1116,9 @@ export default function Page({ children }: Props) {
 							{filteredSettings.map((item) => {
 								const isSingle = item.isSingle !== false;
 								const isActive = isSingle
-									? isActiveRoute({ itemUrl: item.url, pathname })
+									? isActiveRoute({ itemUrl: item.url, pathname:activePath })
 									: item.items.some((item) =>
-											isActiveRoute({ itemUrl: item.url, pathname }),
+											isActiveRoute({ itemUrl: item.url, pathname:activePath }),
 										);
 
 								return (
