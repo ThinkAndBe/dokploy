@@ -1,0 +1,23 @@
+import {beforeEach,it,expect,vi} from 'vitest';
+const m=vi.hoisted(()=>({sql:vi.fn(),begin:vi.fn(),identity:vi.fn()}));
+vi.mock('@dokploy/server/services/release-store',()=>({releaseSql:Object.assign(m.sql,{begin:m.begin,json:(v:unknown)=>v})}));
+vi.mock('@dokploy/server/services/identity-store',()=>({identitySessionAllowed:m.identity,identitySchema:vi.fn()}));
+import {changeKeyExpiry,authenticateMcp} from '@dokploy/server/services/apphub-rbac';
+import {keyExpiration,keyLifetimeDays,keyExpiryInput} from '@dokploy/server/services/mcp-key-lifetime';
+import {assertRoleAction} from '@dokploy/server/services/apphub-role-policy';
+const a={id:'alice',organizationId:'org'},id='00000000-0000-4000-8000-000000000001';
+let member:any,key:any,quota:number;
+beforeEach(()=>{
+ vi.clearAllMocks();member={user_id:'alice',role:'member',apphub_role:'developer',banned:false,canCreateProjects:true,accesedProjects:['p']};key={id,projects:['p'],scopes:['read','write'],expires_at:new Date(0)};quota=0;m.identity.mockResolvedValue(true);
+ m.begin.mockImplementation(async f=>f(m.sql));
+ m.sql.mockImplementation(async(parts:TemplateStringsArray)=>{const s=parts.join('?');if(s.includes('select m.*'))return [member];if(s.includes('select * from apphub_mcp_key'))return key?[key]:[];if(s.includes('select "projectId"'))return [{projectId:'p'}];if(s.includes('count(*)'))return [{n:quota}];return [];});
+});
+it('permits only bounded finite lifetimes and rejects permanent/invalid dates',()=>{expect(keyExpiration(365,0).getTime()).toBe(365*86400000);for(const v of [null,0,366,Infinity,NaN,1.5])expect(keyLifetimeDays.safeParse(v).success).toBe(false);});
+it('renews an expired owned key without changing its hash, projects or scopes',async()=>{const r=await changeKeyExpiry(a,{id,days:365});expect(r.tokenUnchanged).toBe(true);expect(r.expiresAt.getTime()).toBeGreaterThan(Date.now()+364*86400000);const call=m.sql.mock.calls.find(c=>c[0].join('?').startsWith('update apphub_mcp_key'));expect(call?.[0].join('?')).toContain('set expires_at=?');expect(call?.[0].join('?')).not.toMatch(/token_hash=|projects=|scopes=|revoked=/);expect(call?.slice(2)).toEqual([id,'org','alice']);});
+it('requires ownership and organization and never restores a revoked key',async()=>{key=null;await expect(changeKeyExpiry(a,{id,days:90})).rejects.toThrow('已撤销');const reads=m.sql.mock.calls.find(c=>c[0].join('?').includes('select * from apphub_mcp_key'));expect(reads?.[0].join('?')).toContain('user_id=? and not revoked for update');expect(reads?.slice(1)).toEqual([id,'org','alice']);expect(m.sql.mock.calls.some(c=>c[0].join('?').startsWith('update apphub_mcp_key'))).toBe(false);});
+it('rejects renewal after account access is disabled',async()=>{m.identity.mockResolvedValue(false);await expect(changeKeyExpiry(a,{id,days:90})).rejects.toThrow('平台访问');expect(m.begin).not.toHaveBeenCalled();});
+it('does not regrant a removed project or downgraded write permissions',async()=>{member.accesedProjects=[];await expect(changeKeyExpiry(a,{id,days:90})).rejects.toThrow('取消授权');member.accesedProjects=['p'];member.apphub_role='viewer';await expect(changeKeyExpiry(a,{id,days:90})).rejects.toThrow('只读');});
+it('rejects renewal of a creation key after creation permission removal',async()=>{key.scopes=['read','create-project'];member.canCreateProjects=false;await expect(changeKeyExpiry(a,{id,days:90})).rejects.toThrow('创建项目权限');});
+it('read-only members can renew only their existing read-only keys',async()=>{member.apphub_role='viewer';key.scopes=['read'];expect(()=>assertRoleAction('viewer','rbac.changeKeyExpiry','mutation')).not.toThrow();await expect(changeKeyExpiry(a,{id,days:30})).resolves.toMatchObject({tokenUnchanged:true});});
+it('retains the active-key quota and rejects injected scope or token fields',async()=>{quota=20;await expect(changeKeyExpiry(a,{id,days:365})).rejects.toThrow('20');for(const extra of [{scopes:['admin']},{token:'secret'},{userId:'bob'}])expect(keyExpiryInput.safeParse({id,days:365,...extra}).success).toBe(false);});
+it('authentication retains its expiration and revocation checks with no self-renewal',async()=>{await authenticateMcp('apphub_mcp_'+'a'.repeat(43));const read=m.sql.mock.calls.find(c=>c[0].join('?').includes('select * from apphub_mcp_key'));expect(read?.[0].join('?')).toContain('and not revoked and expires_at>now()');const writes=m.sql.mock.calls.filter(c=>c[0].join('?').startsWith('update apphub_mcp_key'));expect(writes).toHaveLength(1);expect(writes[0]?.[0].join('?')).toContain('set last_used_at=now()');});

@@ -1,6 +1,7 @@
 # AppHub AI 项目提交说明 APPHUB-SUBMIT-1
 
 你通过用户的个人 MCP 密钥操作 AppHub。先调用 get_submission_guide 获取当前说明，再用 tools/list 确认可用工具；权限以当前返回为准。密钥仅放在 AI 客户端私密配置，不进入源码、README、日志、截图或交付报告。不要索取独立 Git/仓库/数据库管理员凭据。
+密钥有明确有效期（1–365 天）。过期时停止写入并提示用户登录“AI 接入 → 我的密钥”续期；过期但未撤销的密钥可保留原 KEY 续用，客户端配置不变。AI 不能替自己续期，不能请求管理员凭据绕过；已撤销密钥必须重新接入。
 
 ## 1. 确认项目和交付目标
 先 list_projects，按业务目标选择项目，不能仅按同名猜测；更新已有项目先 list_versions 和 read_code，保留用户已有功能。新项目需 create-project 权限，调用 create_project(name, description, requestKey)，requestKey 是新 UUID，同一次请求重试必须复用，返回 projectId 后继续。项目自动归当前用户所有并绑定当前密钥；仓库未准备好时按返回信息等待，不重复创建。无权限时明确缺少哪项授权，不调用管理员接口绕过。

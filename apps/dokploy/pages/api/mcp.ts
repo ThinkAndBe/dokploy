@@ -8,7 +8,7 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
  if(req.headers['mcp-protocol-version']&&!['2025-03-26','2025-06-18','2025-11-25'].includes(String(req.headers['mcp-protocol-version'])))return res.status(400).json({error:'Unsupported protocol version'});
  if(req.method!=='POST'){res.setHeader('Allow','POST');return res.status(405).end();}
  if(req.headers.origin&&req.headers.origin!==process.env.APPHUB_PUBLIC_URL?.replace(/\/$/,''))return res.status(403).json({error:'Origin not allowed'});
- let auth;try{auth=await authenticateMcp(String(req.headers.authorization||'').replace(/^Bearer /,''));}catch{return res.status(401).json({error:'MCP 密钥无效、已撤销或账号未授权'});}
+ let auth;try{auth=await authenticateMcp(String(req.headers.authorization||'').replace(/^Bearer /,''));}catch{return res.status(401).json({error:'MCP 密钥无效、已过期、已撤销或账号未授权',hint:'过期但未撤销的密钥可登录 AppHub，在 AI 接入 → 我的密钥续期，原 KEY 不变；已撤销的密钥不能恢复。账号或项目授权被取消请联系管理员。'});}
  const b=req.body;if(!b||Array.isArray(b)||b.jsonrpc!=='2.0'||typeof b.method!=='string'||(b.id!==undefined&&typeof b.id!=='string'&&typeof b.id!=='number'&&b.id!==null))return res.status(400).json({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Invalid Request'}});
  if(b.id===undefined){if(b.method==='notifications/initialized'||b.method==='notifications/cancelled')return res.status(202).end();return res.status(400).end();}
  const reply=(result:unknown)=>res.status(200).json({jsonrpc:'2.0',id:b.id,result});
