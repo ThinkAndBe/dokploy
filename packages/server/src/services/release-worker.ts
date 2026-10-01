@@ -1,3 +1,4 @@
+import {assertWrite} from './apphub-rbac';
 import {prepareDatabase,verifyDatabase} from './managed-databases';
 import {randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
@@ -41,17 +42,17 @@ async function execute(p:Plan){
  const reviewer=await findMemberByUserId(p.approved_by,p.organization_id);
  if(p.tier==='formal')requireReviewer(reviewer.role,p.created_by,p.approved_by);
  else if(p.approved_by!==p.created_by&&!['admin','owner'].includes(reviewer.role))throw new Error('确认人的权限已失效');
+ await assertWrite({id:p.created_by,organizationId:p.organization_id});
  const c=p.payload.input.configuration;let current=await db.query.compose.findFirst({where:eq(compose.composeId,p.service_id),with:{domains:true,mounts:true}});
  if(c.kind==='web'||c.kind==='database'){
   if(current)throw new Error('待创建服务已存在，需要运维核对，未重复部署');
   if(c.kind==='web')await checkNewPort(c.publishedPort);else await prepareDatabase(p);
-  await db.insert(compose).values({composeId:p.service_id,name:p.payload.serviceName,environmentId:p.environment_id,appName:'apphubrel-'+p.id.replaceAll('-','').slice(0,16),composeFile:p.payload.compose,sourceType:'raw',composeType:'stack',autoDeploy:false,env:'',command:'',serviceNetworks:(c.kind==='database'?['database','pool']:['app']).map(serviceName=>({serviceName,networkIds:[],detachDokployNetwork:true}))});
+  await db.insert(compose).values({composeId:p.service_id,name:p.payload.serviceName,environmentId:p.environment_id,appName:'apphubrel-'+p.id.replaceAll('-','').slice(0,16),composeFile:p.payload.compose,sourceType:'raw',composeType:'stack',autoDeploy:false,env:'',command:'',serviceNetworks:Object.keys((await import('yaml')).parse(p.payload.compose).services).map(serviceName=>({serviceName,networkIds:[],detachDokployNetwork:true}))});
   current=await db.query.compose.findFirst({where:eq(compose.composeId,p.service_id),with:{domains:true,mounts:true}});
-  const m=await findMemberByUserId(p.created_by,p.organization_id);
-  await db.update(member).set({accessedServices:Array.from(new Set([...m.accessedServices,p.service_id]))}).where(eq(member.id,m.id));
+  if(p.tier==='test')await releaseSql`update member set "accesedServices"=array_append("accesedServices",${p.service_id}) where organization_id=${p.organization_id} and ${p.project_id}=any("accesedProjects") and ${p.environment_id}=any("accessedEnvironments") and not ${p.service_id}=any("accesedServices")`;
  }else{
   if(!current||composeFingerprint(current)!==p.base_hash)throw new Error('部署前配置发生变化，未执行');
-  await db.update(compose).set({composeFile:p.payload.compose}).where(eq(compose.composeId,p.service_id));
+  await db.update(compose).set({composeFile:p.payload.compose,serviceNetworks:Object.keys((await import('yaml')).parse(p.payload.compose).services).map(serviceName=>({serviceName,networkIds:[],detachDokployNetwork:true}))}).where(eq(compose.composeId,p.service_id));
  }
  if(!current)throw new Error('无法创建服务');
  await deployCompose({composeId:p.service_id,titleLog:'发布方案 '+p.id,descriptionLog:'配置摘要 '+p.plan_hash,freshVolumes:false});

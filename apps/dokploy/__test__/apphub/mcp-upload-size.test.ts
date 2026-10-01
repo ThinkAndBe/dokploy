@@ -1,0 +1,17 @@
+import {it,expect,vi,beforeEach} from 'vitest';
+const mocks=vi.hoisted(()=>({preview:vi.fn()}));
+vi.mock('../../../../packages/server/src/services/apphub-rbac',()=>({authorizedProject:async()=>({}),audit:async()=>{},myProjects:async()=>[]}));
+vi.mock('../../../../packages/server/src/services/project-code',()=>({previewCode:mocks.preview,codeProject:vi.fn(),browseCode:vi.fn(),commitCode:vi.fn()}));
+vi.mock('../../../../packages/server/src/services/apphub-versions',()=>({repositoryVersions:vi.fn(),createRepositoryVersion:vi.fn()}));
+vi.mock('../../../../packages/server/src/services/build-service',()=>({startBuild:vi.fn(),listBuilds:vi.fn()}));
+vi.mock('../../../../packages/server/src/services/build-environment',()=>({testEnvironment:vi.fn(),changeTestEnvironment:vi.fn()}));
+vi.mock('../../../../packages/server/src/services/publish-request',()=>({requestPublish:vi.fn()}));
+vi.mock('../../../../packages/server/src/services/release-service',()=>({accessiblePlan:vi.fn()}));
+vi.mock('../../../../packages/server/src/services/mcp-create-project',()=>({createMcpProject:vi.fn()}));
+import {callProjectTool} from '../../../../packages/server/src/services/project-mcp';
+const auth={actor:{id:'user',organizationId:'org'},role:'developer',key:{projects:['p'],scopes:['write']}} as any;
+beforeEach(()=>{vi.clearAllMocks();mocks.preview.mockResolvedValue({id:'preview'});});
+it('accepts an 8 MiB binary payload without regex call stack overflow',async()=>{const data=Buffer.alloc(8*1024*1024,123);await expect(callProjectTool(auth,'preview_code_upload',{projectId:'p',zipBase64:data.toString('base64')})).resolves.toEqual({id:'preview'});expect(mocks.preview.mock.calls[0]?.[2].equals(data)).toBe(true);});
+it('rejects over-limit binary data before archive processing',async()=>{await expect(callProjectTool(auth,'preview_code_upload',{projectId:'p',zipBase64:Buffer.alloc(8*1024*1024+1).toString('base64')})).rejects.toThrow('8 MB');expect(mocks.preview).not.toHaveBeenCalled();});
+it.each(['YWJj!','YQ','YQ===','YQ==\n'])('rejects noncanonical or invalid base64 %s',async data=>{await expect(callProjectTool(auth,'preview_code_upload',{projectId:'p',zipBase64:data})).rejects.toThrow('编码无效');expect(mocks.preview).not.toHaveBeenCalled();});
+it('still rejects an unselected project before decoding',async()=>{await expect(callProjectTool(auth,'preview_code_upload',{projectId:'other',zipBase64:'YQ=='})).rejects.toThrow('未授权');expect(mocks.preview).not.toHaveBeenCalled();});

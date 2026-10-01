@@ -1,3 +1,7 @@
+import {rbacRouter} from './routers/rbac';
+import {identityRouter} from './routers/identity';
+import {projectOperationsRouter} from './routers/project-operations';
+import {buildRouter} from "./routers/build";
 import {releaseRouter} from "./routers/release";
 import { createTRPCRouter } from "../api/trpc";
 import { adminRouter } from "./routers/admin";
@@ -64,6 +68,10 @@ import { volumeBackupsRouter } from "./routers/volume-backups";
  */
 
 export const appRouter = createTRPCRouter({
+ rbac:rbacRouter,
+ identity:identityRouter,
+ projectOperations:projectOperationsRouter,
+ build:buildRouter,
  release:releaseRouter,
 	admin: adminRouter,
 	application: applicationRouter,

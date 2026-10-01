@@ -74,6 +74,8 @@ void app.prepare().then(async () => {
 			const { startDeploymentWorker } = await import("./queues/queueSetup");
 			await startDeploymentWorker();
             if(process.env.APPHUB_RELEASE_POLICY_FILE){const {startReleaseWorker}=await import("@dokploy/server/services/release-worker");startReleaseWorker();}
+            if(process.env.APPHUB_IDENTITY_ENABLED==="true"){const {startIdentityWorker}=await import("@dokploy/server/services/identity-service");startIdentityWorker();}
+            if(process.env.APPHUB_BUILD_ENABLED==="true"){const {startBuildWorker}=await import("@dokploy/server/services/build-service");startBuildWorker();const {startPreviewGateway}=await import("@dokploy/server/services/preview-gateway");startPreviewGateway();}
 		}
 	} catch (e) {
 		console.error("Main Server Error", e);

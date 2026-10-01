@@ -19,7 +19,7 @@ const Page = () => {
 			<div className="h-full rounded-xl max-w-5xl mx-auto flex flex-col gap-4">
 				<ProfileForm />
 				{isCloud && <LinkingAccount />}
-				{permissions?.api.read && <ShowApiKeys />}
+				{permissions?.api.read && <details className="border rounded-xl p-4"><summary className="cursor-pointer">高级：AI 与开发工具接入</summary><p className="text-sm text-muted-foreground my-3">日常代码上传、版本管理和测试无需配置密钥。仅接入外部工具时使用 AppHub 统一接口凭据。</p><ShowApiKeys /></details>}
 			</div>
 		</div>
 	);

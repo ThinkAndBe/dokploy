@@ -1,3 +1,4 @@
+import {buildSchema} from './build-store';
 import {randomUUID} from 'node:crypto';
 import {releaseSql as sql} from './release-store';
 import {accessiblePlan,type Actor} from './release-service';
@@ -7,6 +8,7 @@ import {isProjectAdmin} from './project-sharing';
 export function assertTestedRelease(tier:string,status:string){if(tier!=='test'||status!=='deployed')throw new Error('请先完成测试部署，再申请上线');}
 export async function requestPublish(a:Actor,testedPlanId:string,description:string){
  requireInteractive(a.apiKey);const {plan:p}=await accessiblePlan(a,testedPlanId);assertTestedRelease(p.tier,p.status);
+ await buildSchema();const [build]=await sql`select status from apphub_build_job where plan_id=${p.id}`;if(build&&build.status!=='ready')throw new Error('应用健康检查尚未通过，请先完成测试');
  const [r]=await sql`insert into apphub_publish_request(id,organization_id,project_id,tested_plan_id,created_by,description) values(${randomUUID()},${a.organizationId},${p.project_id},${p.id},${a.id},${description}) on conflict(organization_id,tested_plan_id) do update set tested_plan_id=excluded.tested_plan_id returning id,status`;
  return r;
 }

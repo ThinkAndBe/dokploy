@@ -1,3 +1,6 @@
+import {ssoEndpoints} from '../services/identity-policy';
+import {readIdentitySSO} from '../services/identity-sso-config';
+import {identityLogin} from '../services/identity-service';
 import {productionWebConfig} from '../lib/production-mode';
 import {readSecret} from '../db/constants';
 import crypto from "node:crypto";
@@ -28,15 +31,10 @@ export interface ATrustSSOConfig {
 	appSecret: string;
 }
 
-export const getATrustConfig = (): ATrustSSOConfig => ({
-	enabled: process.env.ATRUST_SSO_ENABLED === "true",
-	ssoServer: (process.env.ATRUST_SSO_SERVER || "").replace(/\/+$/, ""),
-	apiServer: (
-		process.env.ATRUST_API_SERVER || process.env.ATRUST_SSO_SERVER || ""
-	).replace(/\/+$/, ""),
-	appId: process.env.ATRUST_APPID || "",
-	appSecret: process.env.ATRUST_APPSECRET_FILE ? readSecret(process.env.ATRUST_APPSECRET_FILE) : process.env.ATRUST_APPSECRET || "",
-});
+export const getATrustConfig = (): ATrustSSOConfig => {
+ const saved=readIdentitySSO();if(saved)return {enabled:saved.enabled,...ssoEndpoints(saved.server,process.env.ATRUST_SSO_SERVER,process.env.ATRUST_API_SERVER),appId:saved.appId,appSecret:saved.appSecret};
+ return {enabled:process.env.ATRUST_SSO_ENABLED==='true',ssoServer:(process.env.ATRUST_SSO_SERVER||'').replace(/\/+$/,''),apiServer:(process.env.ATRUST_API_SERVER||process.env.ATRUST_SSO_SERVER||'').replace(/\/+$/,''),appId:process.env.ATRUST_APPID||'',appSecret:process.env.ATRUST_APPSECRET_FILE?readSecret(process.env.ATRUST_APPSECRET_FILE):process.env.ATRUST_APPSECRET||''};
+};
 
 export const isATrustConfigured = (): boolean => {
 	const c = getATrustConfig();
@@ -83,6 +81,7 @@ export async function atrustGetUserByCode(code: string): Promise<ATrustUserInfo>
 	const res = await fetch(url, {
 		headers: { "X-SDP-Signature": atrustSign(c.appId, code, c.appSecret) },
 		signal: AbortSignal.timeout(10_000),
+        redirect: "error",
 	});
 	if (!res.ok) {
 		throw new Error(`aTrust 接口 HTTP ${res.status}`);
@@ -90,7 +89,7 @@ export async function atrustGetUserByCode(code: string): Promise<ATrustUserInfo>
 	const body = (await res.json()) as ATrustAPIResponse;
 	// aTrust 约定：code 成功为 0（数字），失败非 0
 	if (Number(body.code) !== 0) {
-		throw new Error(`aTrust 错误 code=${body.code} msg=${body.message ?? ""}`);
+		throw new Error(`aTrust 登录校验失败 code=${body.code}`);
 	}
 	if (!body.data?.name && !body.data?.displayName) {
 		throw new Error("aTrust 返回用户信息为空");
@@ -131,100 +130,4 @@ export interface ATrustLoginResult {
  * - 无账号 → 建号；若系统尚无 owner（首位用户）则建默认组织并授 owner，
  *   否则加入既有默认组织为 member（仿 better-auth databaseHooks 的引导逻辑）
  */
-export async function atrustLogin(u: ATrustUserInfo): Promise<ATrustLoginResult> {
-	const email = atrustEmail(u.name);
-	const now = new Date();
-
-	let dbUser = await db.query.user.findFirst({
-		where: eq(schema.user.email, email),
-	});
-	if (!dbUser) {
-		const inserted = await db
-			.insert(schema.user)
-			.values({
-				email,
-				firstName: u.displayName || u.name,
-				lastName: "",
-				emailVerified: true,
-				isRegistered: true,
-				updatedAt: now,
-			})
-			.returning();
-		dbUser = inserted[0];
-		if (!dbUser) throw new Error("创建用户失败");
-	} else if (u.displayName && dbUser.firstName !== u.displayName) {
-		await db
-			.update(schema.user)
-			.set({ firstName: u.displayName, updatedAt: now })
-			.where(eq(schema.user.id, dbUser.id));
-		dbUser.firstName = u.displayName;
-	}
-
-	if (!dbUser) throw new Error("用户不存在");
-
-	// 组织归属
-	let member = await db.query.member.findFirst({
-		where: eq(schema.member.userId, dbUser.id),
-	});
-	if (!member) {
-		const owner = await db.query.member.findFirst({
-			where: eq(schema.member.role, "owner"),
-			with: { organization: true },
-		});
-		if (owner) {
-			const m = await db
-				.insert(schema.member)
-				.values({
-					organizationId: owner.organizationId,
-					userId: dbUser.id,
-					role: "member",
-					createdAt: now,
-					isDefault: true,
-				})
-				.returning();
-			member = m[0];
-		} else {
-			// 首位用户：建默认组织并成为 owner
-			await db.transaction(async (tx) => {
-				const org = await tx
-					.insert(schema.organization)
-					.values({
-						name: "My Organization",
-						ownerId: dbUser.id,
-						createdAt: now,
-					})
-					.returning();
-				const orgRow = org[0];
-				if (!orgRow) throw new Error("创建组织失败");
-				const m = await tx
-					.insert(schema.member)
-					.values({
-						organizationId: orgRow.id,
-						userId: dbUser.id,
-						role: "owner",
-						createdAt: now,
-						isDefault: true,
-					})
-					.returning();
-				member = m[0];
-			});
-		}
-	}
-	if (!member) throw new Error("组织归属失败");
-
-	// 建会话（better-auth 兼容：直插 session 表，cookie 由调用方设置）
-	const token = crypto.randomBytes(32).toString("hex");
-	const sid = nanoid();
-	const expiresAt = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 3);
-	await db.insert(schema.session).values({
-		id: sid,
-		token,
-		expiresAt,
-		createdAt: now,
-		updatedAt: now,
-		userId: dbUser.id,
-		activeOrganizationId: member?.organizationId || null,
-	});
-
-	return { token, expiresAt };
-}
+export async function atrustLogin(u:ATrustUserInfo):Promise<ATrustLoginResult>{return identityLogin(u);}

@@ -1,3 +1,4 @@
+import {memberRole,assertWrite} from './apphub-rbac';
 import {releaseSql as sql} from './release-store';
 import {releaseTargets,requireInteractive} from './release-policy';
 import type {Actor} from './release-service';
@@ -17,13 +18,13 @@ export async function initializeProjectOwner(a:Actor,projectId:string){
  await sql`insert into apphub_project_owner(project_id,organization_id,user_id) values(${projectId},${a.organizationId},${a.id}) on conflict do nothing`;
 }
 export async function sharingDetails(a:Actor,projectId:string){
- const {m,owner}=await context(sql,a,projectId);const canManage=isProjectAdmin(m.role)||owner===a.id;
+ const {m,owner}=await context(sql,a,projectId);const canManage=(await memberRole(a)).effectiveRole!=='viewer'&&(isProjectAdmin(m.role)||owner===a.id);
  const rows=await sql`select m.user_id as id,coalesce(nullif(trim(concat_ws(' ',u."firstName",u."lastName")),''),u.email) as name,u.email from member m join "user" u on u.id=m.user_id where m.organization_id=${a.organizationId} and ${projectId}=any(m."accesedProjects") order by u.email`;
  const candidates=canManage?await sql`select m.user_id as id,coalesce(nullif(trim(concat_ws(' ',u."firstName",u."lastName")),''),u.email) as name,u.email from member m join "user" u on u.id=m.user_id where m.organization_id=${a.organizationId} order by u.email`:[];
  return {ownerId:owner??null,canManage,members:rows.map(r=>({id:String(r.id),name:String(r.name),email:String(r.email),role:r.id===owner?'负责人':'协作者'})),candidates:candidates.map(r=>({id:String(r.id),name:String(r.name),email:String(r.email)}))};
 }
 export async function changeSharing(a:Actor,input:{projectId:string;userId:string;action:'grant'|'revoke'|'transfer';keepPrevious:boolean}){
- requireInteractive(a.apiKey);
+ requireInteractive(a.apiKey);await assertWrite(a);
  const targets=(await releaseTargets()).filter(t=>t.organizationId===a.organizationId&&t.projectId===input.projectId&&t.tier==='test');
  return sql.begin(async q=>{
   await q`select pg_advisory_xact_lock(hashtext(${input.projectId}))`;
@@ -35,7 +36,8 @@ export async function changeSharing(a:Actor,input:{projectId:string;userId:strin
   const envs=await q`select "environmentId" as id from environment where "projectId"=${input.projectId}`;
   const allEnv=envs.map(v=>v.id);const testEnv=targets.map(v=>v.environmentId);
   const services=await q`select "composeId" as id,"environmentId" as env from compose where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId}) union all select "applicationId" as id,"environmentId" as env from application where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId}) union all select "postgresId" as id,"environmentId" as env from "postgres" where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId}) union all select "mysqlId" as id,"environmentId" as env from "mysql" where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId}) union all select "mariadbId" as id,"environmentId" as env from "mariadb" where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId}) union all select "mongoId" as id,"environmentId" as env from "mongo" where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId}) union all select "redisId" as id,"environmentId" as env from "redis" where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId}) union all select "libsqlId" as id,"environmentId" as env from "libsql" where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId})`;
-  const allService=services.map(v=>v.id);const testService=services.filter(v=>testEnv.includes(v.env)).map(v=>v.id);
+  const appServices=await q`select "composeId" as id from compose where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId}) union all select "applicationId" as id from application where "environmentId" in (select "environmentId" from environment where "projectId"=${input.projectId})`;
+  const allService=services.map(v=>v.id);const testService=services.filter(v=>testEnv.includes(v.env)&&appServices.some(s=>s.id===v.id)).map(v=>v.id);
   async function apply(row:any,grant:boolean){
    const projectIds=grant?[...new Set([...row.accesedProjects,input.projectId])]:row.accesedProjects.filter((v:string)=>v!==input.projectId);
    const envIds=grant?[...new Set([...row.accessedEnvironments,...testEnv])]:row.accessedEnvironments.filter((v:string)=>!allEnv.includes(v));

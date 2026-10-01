@@ -1,3 +1,4 @@
+import {identitySessionAllowed} from '../services/identity-store';
 import {productionWebConfig} from './production-mode';
 import type { IncomingMessage } from "node:http";
 import { apiKey } from "@better-auth/api-key";
@@ -586,6 +587,7 @@ export const validateRequest = async (request: IncomingMessage) => {
 				},
 			});
 
+			if(!member)return {session:null,user:null};
 			// When accessing from DB, use actual column names
 			const userFromDb = apiKeyRecord.user as typeof apiKeyRecord.user & {
 				firstName: string;
@@ -614,7 +616,8 @@ export const validateRequest = async (request: IncomingMessage) => {
 				},
 			};
 
-			return mockSession;
+			if(!await identitySessionAllowed(userFromDb.id)||userFromDb.banned)return {session:null,user:null};
+            return mockSession;
 		} catch (error) {
 			console.error("Error verifying API key", error);
 			return {
@@ -638,6 +641,7 @@ export const validateRequest = async (request: IncomingMessage) => {
 		};
 	}
 
+	if(session?.user&&!await identitySessionAllowed(session.user.id))return {session:null,user:null};
 	if (session?.user) {
 		const member = await db.query.member.findFirst({
 			where: and(

@@ -1,3 +1,4 @@
+import {fixedCallback} from '@dokploy/server/services/identity-policy';
 import {productionWebConfig} from '@dokploy/server/lib/production-mode';
 import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "node:crypto";
@@ -17,19 +18,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 	}
 
 	const state = crypto.randomBytes(12).toString("hex");
-	const proto =
-		process.env.ATRUST_CALLBACK_URL?.split("://")[0] ||
-		(req.headers["x-forwarded-proto"] as string) ||
-		"http";
-	const host =
-		process.env.ATRUST_CALLBACK_URL?.split("://")[1] ||
-		(req.headers["x-forwarded-host"] as string) ||
-		req.headers.host ||
-		"localhost:3000";
-	const redirectUri =
-        (productionWebConfig().secure ? productionWebConfig().origin+"/api/auth/atrust/callback" : undefined) ||
-		process.env.ATRUST_CALLBACK_URL ||
-		`${proto}://${host}/api/auth/atrust/callback`;
+	const redirectUri=fixedCallback(process.env.APPHUB_PUBLIC_URL||productionWebConfig().origin||'',process.env.ATRUST_CALLBACK_URL);
 
 	res.setHeader("Set-Cookie", [
 		`${STATE_COOKIE}=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=300${productionWebConfig().cookieSuffix}`,

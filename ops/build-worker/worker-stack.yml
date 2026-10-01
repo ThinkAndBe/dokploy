@@ -1,0 +1,47 @@
+version: "3.8"
+services:
+  worker:
+    image: ${APPHUB_WORKER_IMAGE}
+    environment:
+      APPHUB_URL: http://apphub-production-console_apphub:3000
+      APPHUB_BUILD_TOKEN_FILE: /run/secrets/build_token
+      APPHUB_DOCKER_CONFIG_FILE: /run/secrets/registry_config
+      APPHUB_WORK_ROOT: /work
+      APPHUB_BUILD_WORKER_ID: cluster-builder
+      APPHUB_DOTNET_SDK_IMAGE: ${APPHUB_DOTNET_SDK_IMAGE}
+      APPHUB_DOTNET_RUNTIME_IMAGE: ${APPHUB_DOTNET_RUNTIME_IMAGE}
+    secrets:
+      - source: build_token
+        target: build_token
+      - source: registry_config
+        target: registry_config
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - work:/work
+    networks: [platform]
+    deploy:
+      replicas: 1
+      placement:
+        constraints: ["node.hostname == ${APPHUB_BUILD_NODE}"]
+      resources:
+        limits: {cpus: "1", memory: 512M}
+        reservations: {memory: 128M}
+      update_config: {parallelism: 1, order: stop-first, failure_action: rollback}
+      restart_policy: {condition: on-failure, delay: 5s}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+networks:
+  platform:
+    external: true
+    name: apphub-production-console_frontend
+volumes:
+  work:
+    name: apphub-build-work
+secrets:
+  build_token:
+    external: true
+    name: apphub-build-worker-token-v1
+  registry_config:
+    external: true
+    name: apphub-build-registry-v1

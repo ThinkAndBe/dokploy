@@ -47,3 +47,5 @@ yarn-error.log*
 
 .playwright-*
 .credentials
+# Runtime configuration is supplied outside source control.
+.env.production

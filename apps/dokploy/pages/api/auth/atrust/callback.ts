@@ -14,6 +14,7 @@ import {
 const STATE_COOKIE = "atrust_sso_state";
 
 const fail = (res: NextApiResponse, msg: string) => {
+ res.setHeader("Set-Cookie",`atrust_sso_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${productionWebConfig().cookieSuffix}`);
 	res.redirect(302, "/?error=" + encodeURIComponent(msg));
 };
 
@@ -25,7 +26,7 @@ export default async function handler(
 		fail(res, "管理员未启用零信任单点登录");
 		return;
 	}
-	const state = (req.query.state as string) || "";
+	const state = typeof req.query.state==="string"?req.query.state:"";
 	const cookieState =
 		req.headers.cookie
 			?.split(";")
@@ -36,7 +37,7 @@ export default async function handler(
 		fail(res, "登录状态校验失败，请重试");
 		return;
 	}
-	const code = (req.query.code as string) || "";
+	const code = typeof req.query.code==="string"?req.query.code:"";
 	if (!code) {
 		fail(res, "未获取到授权码");
 		return;
@@ -54,7 +55,7 @@ export default async function handler(
 			`${ATRUST_SESSION_COOKIE}=${encodeURIComponent(atrustSignedSessionCookie(token))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${productionWebConfig().cookieSuffix}`,
 			`${STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${productionWebConfig().cookieSuffix}`,
 		]);
-		res.redirect(302, "/dashboard/projects");
+		res.redirect(302, "/dashboard/home");
 	} catch (e) {
 		fail(res, e instanceof Error ? e.message : "零信任登录失败");
 	}

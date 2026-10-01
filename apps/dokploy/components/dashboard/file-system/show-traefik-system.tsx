@@ -46,7 +46,7 @@ export const ShowTraefikSystem = ({ serverId }: Props) => {
 					<CardHeader className="">
 						<CardTitle className="text-xl flex flex-row gap-2">
 							<FileIcon className="size-6 text-muted-foreground self-center" />
-							Traefik File System
+							网关配置文件（管理员高级设置）
 						</CardTitle>
 						<CardDescription>
 							Manage all the files and directories in {"'/etc/dokploy/traefik'"}
@@ -54,8 +54,7 @@ export const ShowTraefikSystem = ({ serverId }: Props) => {
 						</CardDescription>
 
 						<AlertBlock type="warning">
-							Adding invalid configuration to existing files, can break your
-							Traefik instance, preventing access to your applications.
+							操作提醒（不是故障提示）：这里可直接编辑网关文件。配置错误会影响应用访问；日常测试和上线无需进入此页面。
 						</AlertBlock>
 					</CardHeader>
 					<CardContent className="space-y-2 py-8 border-t">

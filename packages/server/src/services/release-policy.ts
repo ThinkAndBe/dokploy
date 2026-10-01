@@ -3,16 +3,16 @@ import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {z} from 'zod';
 
-export const webSchema=z.object({kind:z.literal('web'),name:z.string().min(1).max(80),image:z.string().max(300),containerPort:z.number().int().min(1).max(65535),publishedPort:z.number().int().min(1024).max(65535),replicas:z.number().int().min(1).max(3).default(1),memoryMb:z.number().int().min(128).max(2048).default(512),databasePlanId:z.string().uuid().optional(),environment:z.record(z.string(),z.string().max(300)).default({}),loginMethod:z.string().max(400).default('应用自行管理登录；请补齐业务账号说明'),initialAccount:z.string().max(100).default(''),credentialHint:z.string().max(400).default('请联系应用负责人领取；禁止在方案中提交明文密码')}).strict();
+export const webSchema=z.object({kind:z.literal('web'),buildJobId:z.string().uuid().optional(),name:z.string().min(1).max(80),image:z.string().max(300),containerPort:z.number().int().min(1).max(65535),publishedPort:z.number().int().min(1024).max(65535),replicas:z.number().int().min(1).max(3).default(1),memoryMb:z.number().int().min(128).max(2048).default(512),databasePlanId:z.string().uuid().optional(),environment:z.record(z.string(),z.string().max(300)).default({}),loginMethod:z.string().max(400).default('应用自行管理登录；请补齐业务账号说明'),initialAccount:z.string().max(100).default(''),credentialHint:z.string().max(400).default('请联系应用负责人领取；禁止在方案中提交明文密码')}).strict();
 export const changeSchema=z.object({kind:z.literal('update'),serviceId:z.string().min(1).max(100),component:z.string().regex(/^[a-zA-Z0-9_-]+$/).max(80),image:z.string().max(300),replicas:z.number().int().min(1).max(3).optional()}).strict();
 export const releaseInput=z.object({environmentId:z.string().min(1).max(100),title:z.string().min(1).max(120),description:z.string().max(1500).default(''),idempotencyKey:z.string().uuid(),configuration:z.discriminatedUnion('kind',[webSchema,changeSchema,databaseSchema]),testedPlanId:z.string().uuid().optional()}).strict();
 export type ReleaseInput=z.infer<typeof releaseInput>;
-const targetSchema=z.object({organizationId:z.string(),projectId:z.string(),environmentId:z.string(),tier:z.enum(['test','formal']),databaseNode:z.string().regex(/^[a-zA-Z0-9.-]+$/).optional(),databaseImages:z.record(z.enum(['postgres','mysql']),z.object({image:z.string(),poolImage:z.string()})).optional(),allowNewWeb:z.boolean().default(false),imagePrefixes:z.array(z.string().min(3)).min(1),ports:z.array(z.number().int()).default([]),hostname:z.string().regex(/^[a-zA-Z0-9.-]+$/),serviceIds:z.array(z.string()).default([]),allowedEnvironmentKeys:z.array(z.string()).default([]),testEnvironmentId:z.string().optional(),testServiceIds:z.array(z.string()).default([])}).strict();
+const targetSchema=z.object({managedBuild:z.boolean().optional(),sandboxNode:z.string().regex(/^[a-zA-Z0-9.-]+$/).optional(),storageVolume:z.string().regex(/^[a-zA-Z0-9_-]+$/).optional(),organizationId:z.string(),projectId:z.string(),environmentId:z.string(),tier:z.enum(['test','formal']),databaseNode:z.string().regex(/^[a-zA-Z0-9.-]+$/).optional(),databaseImages:z.record(z.enum(['postgres','mysql']),z.object({image:z.string(),poolImage:z.string()})).optional(),allowNewWeb:z.boolean().default(false),imagePrefixes:z.array(z.string().min(3)).min(1),ports:z.array(z.number().int()).default([]),hostname:z.string().regex(/^[a-zA-Z0-9.-]+$/),serviceIds:z.array(z.string()).default([]),allowedEnvironmentKeys:z.array(z.string()).default([]),testEnvironmentId:z.string().optional(),testServiceIds:z.array(z.string()).default([])}).strict();
 export type ReleaseTarget=z.infer<typeof targetSchema>;
 export async function releaseTargets(){
  const file=process.env.APPHUB_RELEASE_POLICY_FILE;
  if(!file)return [];
- return z.array(targetSchema).parse(JSON.parse(await readFile(file,'utf8')));
+ const base=JSON.parse(await readFile(file,'utf8'));const managed=await (await import('./build-store')).managedBuildTargets();return z.array(targetSchema).parse([...base,...managed]);
 }
 export const digest=(v:unknown):string=>createHash('sha256').update(canonical(v)).digest('hex');
 function canonical(v:unknown):string {if(Array.isArray(v))return '['+v.map(canonical).join(',')+']';if(v&&typeof v==='object')return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical((v as Record<string,unknown>)[k])).join(',')+'}';return JSON.stringify(v)??'null';}
@@ -33,6 +33,8 @@ export function requireInteractive(apiKey:unknown){if(apiKey)throw new Error('�
 export function requireReviewer(role:string,author:string,reviewer:string){if(!['owner','admin'].includes(role)||author===reviewer)throw new Error('正式发布必须由另一位运维管理员审批');}
 export function guardNativeMutation(enabled:boolean,role:string,apiKey:unknown,path:string,type:string){
  if(!enabled||type!=='mutation')return;
+ if(['project.createVersion','project.createVersionKey'].includes(path))return;
+ if(!apiKey&&['project.create','project.changeSharing','project.commitCode'].includes(path))return;
  const resources=new Set(['compose','application','environment','project','domain','mounts','port','redirects','security','schedule','rollbacks','previewDeployment','volumeBackups','backup','postgres','mysql','mariadb','mongo','redis','libsql']);
  if(resources.has(path.split('.')[0]!)&&(apiKey||!['owner','admin'].includes(role)))throw new Error('该平台已启用配置方案流程，请提交发布方案并在页面确认；不能绕过审批直接修改部署');
 }

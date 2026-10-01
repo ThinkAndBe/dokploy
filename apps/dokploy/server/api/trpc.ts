@@ -1,3 +1,4 @@
+import {authorizeRoute} from '@dokploy/server/services/apphub-rbac';
 import {guardNativeMutation} from "@dokploy/server/services/release-policy";
 /**
  * YOU PROBABLY DON'T NEED TO EDIT THIS FILE, UNLESS:
@@ -149,7 +150,8 @@ export const createTRPCRouter = t.router;
  * guarantee that a user querying is authorized, but you can still access user session data if they
  * are logged in.
  */
-const scopedProcedure=t.procedure.use(({ctx,next,path})=>{
+const scopedProcedure=t.procedure.use(async ({ctx,next,path,type})=>{
+ if(ctx.user&&ctx.session){try{await authorizeRoute({id:ctx.user.id,organizationId:ctx.session.activeOrganizationId},path,type);}catch(e){throw new TRPCError({code:'FORBIDDEN',message:e instanceof Error?e.message:'无权限'});}}
  const scope=(ctx.user as any)?.apphubScope;
  const allowed:Record<string,string[]>={
   'version-management':['project.workspace','project.repositoryVersions','project.createVersion'],

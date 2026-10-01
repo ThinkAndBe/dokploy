@@ -1,0 +1,13 @@
+import {it,expect,vi} from 'vitest';
+const state=vi.hoisted(()=>({headers:{} as any,status:200}));
+vi.mock('node:http',()=>({default:{get:(options:any,callback:any)=>{state.headers=options.headers;queueMicrotask(()=>callback({statusCode:state.status,resume(){}}));return {setTimeout(){},on(){},destroy(){}};}}}));
+vi.mock('@dokploy/server/constants',()=>({docker:{getService:()=>({inspect:async()=>({ID:'service',Spec:{Name:'apphubrel-abcd_app',Labels:{'com.docker.stack.namespace':'apphubrel-abcd'},Mode:{Replicated:{Replicas:1}},TaskTemplate:{ContainerSpec:{Image:'image',Mounts:[]}}}})}),listTasks:async()=>[{Status:{State:'running'},DesiredState:'running',Spec:{ContainerSpec:{Image:'image'}}}]}}));
+vi.mock('@dokploy/server/db',()=>({db:{query:{compose:{findFirst:async()=>({appName:'apphubrel-abcd',environmentId:'build-1234567890abcdef',environment:{projectId:'p'}})}}}}));
+vi.mock('@dokploy/server/db/schema',()=>({compose:{composeId:'id'}}));
+vi.mock('@dokploy/server/services/project-code',()=>({codeProject:async()=>({})}));
+vi.mock('@dokploy/server/services/release-policy',()=>({requireInteractive:()=>{}}));
+vi.mock('@dokploy/server/services/preview-gateway',()=>({previewProbe:()=> 'encrypted-probe'}));
+vi.mock('@dokploy/server/services/preview-policy',()=>({previewOrigin:()=> 'http://1234567890abcdef.sandbox.apphub.erke.com'}));
+vi.mock('@dokploy/server/services/build-store',()=>({buildSchema:async()=>{},sql:async(strings:TemplateStringsArray)=>{const q=strings.join('');if(q.includes('apphub_build_project'))return [{project_id:'p',service_id:'c',environment_id:'build-1234567890abcdef',port:32060}];if(q.includes('join apphub_release_plan'))return [{manifest:{health:'/health'},commit_sha:'abc',id:'job',payload:{handoff:{}}}];return [];}}));
+import {testEnvironment} from '../../../../packages/server/src/services/build-environment';
+it('uses scoped authenticated health probing when checking an already running test app',async()=>{vi.stubEnv('APPHUB_BUILD_TEST_HOST','10.5.50.245');const a={id:'u',organizationId:'o'};state.status=200;const result=await testEnvironment(a,'p');expect(result.state).toBe('running');expect(state.headers.Host).toBe('1234567890abcdef.sandbox.apphub.erke.com');expect(state.headers['x-apphub-probe']).toBe('encrypted-probe');state.status=403;expect((await testEnvironment(a,'p')).state).toBe('unhealthy');vi.unstubAllEnvs();});
