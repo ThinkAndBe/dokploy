@@ -1,3 +1,4 @@
+import {listRecycled,changeRecycled} from '@dokploy/server/services/version-recycle';
 import {versionInput,versionListOutput} from '@dokploy/server/services/version-api';
 import {browseCode,commitCode} from '@dokploy/server/services/project-code';
 import {readHandoff,canRevealCredential,revealCredential} from "@dokploy/server/services/apphub-handoff";
@@ -78,6 +79,11 @@ import { getBillingStatus } from "@/server/utils/billing";
 import {sharingDetails,changeSharing,initializeProjectOwner} from '@dokploy/server/services/project-sharing';
 const sharingActor=(ctx:any)=>({id:ctx.user.id,organizationId:ctx.session.activeOrganizationId,apiKey:ctx.req.headers['x-api-key']});
 export const projectRouter = createTRPCRouter({
+ recycledVersions:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200)})).query(({ctx,input})=>listRecycled(sharingActor(ctx),input.projectId)),
+ changeVersion:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200),name:versionInput.shape.name,commit:versionInput.shape.commit,action:z.enum(['delete','restore'])})).mutation(async({ctx,input})=>{
+  if(ctx.req.headers.origin!==process.env.APPHUB_PUBLIC_URL?.replace(/\/$/,''))throw new TRPCError({code:'FORBIDDEN',message:'请从项目页面管理版本'});
+  try{return await changeRecycled(sharingActor(ctx),input);}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'版本操作未完成'});}
+ }),
  sharing:protectedProcedure.input(z.object({projectId:z.string().min(1)})).query(({ctx,input})=>sharingDetails(sharingActor(ctx),input.projectId)),
  changeSharing:protectedProcedure.input(z.object({projectId:z.string().min(1),userId:z.string().min(1),action:z.enum(['grant','revoke','transfer']),keepPrevious:z.boolean().default(false)})).mutation(({ctx,input})=>changeSharing(sharingActor(ctx),input)),
  serviceHandoff: protectedProcedure.input(z.object({serviceId:z.string().min(1).max(200)})).query(async({input,ctx})=>{

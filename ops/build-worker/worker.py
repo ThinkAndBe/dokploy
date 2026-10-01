@@ -38,10 +38,36 @@ def unpack(data,dest):
    if (e.external_attr>>16)&0o111:p.chmod(0o755)
 
 def dockerfile(src,m):
+ context=m.get('context')
+ if context:src=src/safe_path(context)
+ if not src.is_dir():raise ValueError('构建 context 不存在')
  if m['type']=='dockerfile':
   path=src/safe_path(m['dockerfile'])
   if not path.is_file():raise ValueError('找不到 Dockerfile：'+m['dockerfile'])
   return path
+ if m['type'] in ('static','node'):
+  node=os.environ.get('APPHUB_NODE_IMAGE','node:24-bookworm-slim')
+  nginx=os.environ.get('APPHUB_NGINX_IMAGE','nginx:stable-alpine')
+  entry=m.get('entry');output=m.get('output','dist');port=int(m['port'])
+  if entry and entry!='package.json':raise ValueError('自动前端/Node 入口必须为 package.json')
+  if output!='.':safe_path(output)
+  build=''
+  if entry:
+   package=json.loads((src/'package.json').read_text())
+   install='npm ci' if (src/'package-lock.json').is_file() else 'npm install'
+   build='FROM '+node+' AS build\nWORKDIR /src\nCOPY . .\nRUN '+install+'\n'
+   if package.get('scripts',{}).get('build'):build+='RUN npm run build\n'
+   if m['type']=='static':build+='RUN '+json.dumps(['test','-f','/src/'+output+'/index.html'])+'\n'
+   if m['type']=='static' and not package.get('scripts',{}).get('build'):raise ValueError('前端缺少 build 脚本')
+  if m['type']=='node':
+   if not package.get('scripts',{}).get('start'):raise ValueError('Node 缺少 start 脚本')
+   text=build+'ENV NODE_ENV=production PORT='+str(port)+' HOST=0.0.0.0 HOSTNAME=0.0.0.0\nUSER node\nEXPOSE '+str(port)+'\nCMD ["npm","run","start"]\n'
+  else:
+   conf='pid /tmp/nginx.pid;\nevents {}\nhttp { include /etc/nginx/mime.types; default_type application/octet-stream; access_log /dev/stdout; error_log /dev/stderr; client_body_temp_path /tmp/client; proxy_temp_path /tmp/proxy; fastcgi_temp_path /tmp/fastcgi; uwsgi_temp_path /tmp/uwsgi; scgi_temp_path /tmp/scgi; server { listen '+str(port)+'; root /app/www; location = /health { return 200 "ok"; } location / { try_files $uri $uri/ /index.html; } } }\n'
+   (src/'.apphub-nginx.conf').write_text(conf)
+   data='COPY --from=build /src/'+output+' /app/www\n' if entry else 'COPY '+output+' /app/www\n'
+   text=build+'FROM '+nginx+'\nWORKDIR /app\n'+data+'COPY .apphub-nginx.conf /app/nginx.conf\nUSER 10001:10001\nEXPOSE '+str(port)+'\nENTRYPOINT ["nginx","-c","/app/nginx.conf","-g","daemon off;"]\n'
+  path=src/'.apphub-generated.Dockerfile';path.write_text(text);return path
  entry=safe_path(m['entry'])
  if not (src/entry).is_file():raise ValueError('找不到 .NET 项目入口')
  command=['dotnet','publish',entry,'-c','Release','--no-self-contained','-p:PublishSingleFile=false','-p:UseAppHost=false','-o','/out']
@@ -61,7 +87,7 @@ class Job:
     if r.get('cancel'):self.cancel.set()
    except Exception:self.add('\n执行器与平台连接中断，停止本次任务。\n');self.cancel.set()
  def run(self,args,timeout=1800):
-  env={**os.environ,'DOCKER_BUILDKIT':'0'}
+  env={**os.environ,'DOCKER_BUILDKIT':'1'}
   # Child source builds do not receive this process environment; docker sends only the context.
   p=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env,start_new_session=True)
   def read():
@@ -81,7 +107,7 @@ class Job:
   if not re.fullmatch(r'[a-f0-9-]{36}',j['id']):raise ValueError('任务 ID 无效')
   folder=ROOT/'jobs'/j['id'];src=folder/'source';src.mkdir(parents=True,exist_ok=False)
   threading.Thread(target=self.progress,daemon=True).start()
-  tag=j['repository']+':build-'+j['id'];success=False
+  tag=j['repository']+':build-'+j['id'];success=False;builder='apphub-job-'+j['id']
   try:
    if shutil.disk_usage(ROOT).free<5*1024**3:raise RuntimeError('构建存储剩余空间不足5GB，请管理员清理或扩容')
    self.add('读取固定代码版本 '+j['commit']+'\n')
@@ -89,7 +115,15 @@ class Job:
    with urllib.request.urlopen(req,timeout=60) as r:data=r.read(100*1024*1024+1)
    if len(data)>100*1024*1024:raise RuntimeError('代码包过大')
    unpack(data,src);df=dockerfile(src,j['manifest']);self.add('开始构建；最多4核、8GB内存。\n')
-   self.run(['docker','build','--force-rm','--memory','8g','--memory-swap','8g','--cpu-period','100000','--cpu-quota','400000','--label','apphub.managed-build=true','--label','apphub.build-job='+j['id'],'-f',str(df),'-t',tag,str(src)])
+   config=folder/'buildkitd.toml';ca=os.environ.get('APPHUB_REGISTRY_CA_FILE')
+   if not ca or not pathlib.Path(ca).is_file():raise RuntimeError('构建镜像仓库证书未配置，未使用不安全连接')
+   registry=j['repository'].split('/')[0]
+   config.write_text('[registry.'+json.dumps(registry)+']\n  ca = ['+json.dumps(ca)+']\n')
+   image=os.environ.get('APPHUB_BUILDKIT_IMAGE')
+   if not image:raise RuntimeError('BuildKit 基础镜像未配置')
+   self.run(['docker','buildx','create','--name',builder,'--driver','docker-container','--buildkitd-config',str(config),'--driver-opt','image='+image,'--driver-opt','memory=8g','--driver-opt','memory-swap=8g','--driver-opt','cpu-period=100000','--driver-opt','cpu-quota=400000'],timeout=120)
+   context=src/safe_path(j['manifest']['context']) if j['manifest'].get('context') else src
+   self.run(['docker','buildx','build','--builder',builder,'--platform','linux/amd64','--load','--progress','plain','--label','apphub.managed-build=true','--label','apphub.build-job='+j['id'],'-f',str(df),'-t',tag,str(context)])
    if self.cancel.is_set():raise RuntimeError('已取消')
    self.add('\n构建完成，正在保存镜像。\n');self.run(['docker','push',tag],timeout=600)
    raw=subprocess.check_output(['docker','image','inspect',tag],timeout=30);image=json.loads(raw)[0]
@@ -105,6 +139,9 @@ class Job:
   finally:
    self.done.set();(folder/'build.log').write_text(self.lines)
    if src.resolve().parent==folder.resolve() and folder.resolve().parent==ROOT/'jobs':shutil.rmtree(src,ignore_errors=True)
+   # This builder belongs only to this job; remove its container and private cache volume.
+   try:subprocess.run(['docker','buildx','rm','--force',builder],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=60)
+   except subprocess.TimeoutExpired:self.add('本次 BuildKit 清理超时，请管理员检查任务 '+j['id']+'\n')
    # Remove only this job's tag; never prune the shared node's images, volumes or build cache.
    subprocess.run(['docker','image','rm',tag],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
 

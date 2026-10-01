@@ -14,12 +14,12 @@ export function readCodeArchive(buffer:Buffer,stripRoot=false){
  if(buffer.length>ZIP_LIMIT)throw new Error('ZIP 文件不能超过 20 MB');
  let zip:AdmZip;try{zip=new AdmZip(buffer);}catch{throw new Error('不是有效的 ZIP 文件');}
  const entries=zip.getEntries();if(entries.length>COUNT_LIMIT*3)throw new Error('代码包条目过多，请移除依赖和生成文件');
- const paths=entries.filter(e=>!e.isDirectory).map(e=>safeCodePath(e.entryName));
+ const paths=entries.filter(e=>!e.isDirectory).map(e=>safeCodePath(e.entryName)).filter(p=>!p.split('/').includes('__MACOSX')&&!['.DS_Store','Thumbs.db'].includes(p.split('/').at(-1)!));
  const root=stripRoot&&paths.length&&paths.every(p=>p.includes('/')&&p.split('/')[0]===paths[0]!.split('/')[0])?paths[0]!.split('/')[0]+'/':'';
  const files:CodeFile[]=[],ignored:string[]=[];let total=0;const seen=new Set<string>();
  for(const entry of entries){
   if(entry.isDirectory)continue;
-  const original=safeCodePath(entry.entryName),path=safeCodePath(root?original.slice(root.length):original);
+  const original=safeCodePath(entry.entryName);if(original.split('/').includes('__MACOSX')||['.DS_Store','Thumbs.db'].includes(original.split('/').at(-1)!)){ignored.push(original);continue;}const path=safeCodePath(root?original.slice(root.length):original);
   const parts=path.split('/'),name=parts.at(-1)!;
   if(original.split('/').some(p=>['.git','node_modules','.next','__pycache__','.venv','venv','__MACOSX'].includes(p))||['.DS_Store','Thumbs.db'].includes(name)){ignored.push(path);continue;}
   if((name==='.env'||name.startsWith('.env.'))&&!/\.(example|sample|template)$/.test(name))throw new Error(`请移除含实际环境配置的文件：${path}；密码请在平台应用配置中管理`);

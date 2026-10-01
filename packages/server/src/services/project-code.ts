@@ -1,3 +1,4 @@
+import {inspectTestSource} from './test-compatibility';
 import {assertWrite} from './apphub-rbac';
 import {readFile,writeFile,mkdir,mkdtemp,rm,readdir,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -82,7 +83,7 @@ export async function previewCode(a:Actor,id:string,buffer:Buffer,stripRoot=fals
   for(const f of repo.tree)if(!after.has(f.path))changes.push({path:f.path,kind:'移除'});
   const preview:Preview={id:randomUUID(),projectId:id,organizationId:a.organizationId,actor:a.id,createdAt:Date.now(),base:repo.head,branch:repo.branch,changes,fileCount:archive.files.length,ignored:archive.ignored,removedWrapper:archive.removedWrapper,stripRoot};
   await writeFile(path.join(stageRoot(),preview.id+'.zip'),buffer,{mode:0o600});await writeFile(path.join(stageRoot(),preview.id+'.json'),JSON.stringify(preview),{mode:0o600});
-  return {id:preview.id,changes,fileCount:preview.fileCount,ignored:preview.ignored,removedWrapper:preview.removedWrapper};
+  return {id:preview.id,changes,fileCount:preview.fileCount,ignored:preview.ignored,removedWrapper:preview.removedWrapper,compatibility:inspectTestSource(archive.files)};
  }finally{await rm(repo.dir,{recursive:true,force:true});}
 }
 export async function commitCode(a:Actor,input:{previewId:string;name:string;description:string;projectId?:string}){

@@ -8,6 +8,10 @@ services:
       APPHUB_DOCKER_CONFIG_FILE: /run/secrets/registry_config
       APPHUB_WORK_ROOT: /work
       APPHUB_BUILD_WORKER_ID: cluster-builder
+      APPHUB_NODE_IMAGE: ${APPHUB_NODE_IMAGE}
+      APPHUB_NGINX_IMAGE: ${APPHUB_NGINX_IMAGE}
+      APPHUB_BUILDKIT_IMAGE: ${APPHUB_BUILDKIT_IMAGE}
+      APPHUB_REGISTRY_CA_FILE: /run/configs/registry-ca.crt
       APPHUB_DOTNET_SDK_IMAGE: ${APPHUB_DOTNET_SDK_IMAGE}
       APPHUB_DOTNET_RUNTIME_IMAGE: ${APPHUB_DOTNET_RUNTIME_IMAGE}
     secrets:
@@ -15,6 +19,9 @@ services:
         target: build_token
       - source: registry_config
         target: registry_config
+    configs:
+      - source: registry_ca
+        target: /run/configs/registry-ca.crt
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - work:/work
@@ -45,3 +52,8 @@ secrets:
   registry_config:
     external: true
     name: apphub-build-registry-v1
+
+configs:
+  registry_ca:
+    external: true
+    name: ${APPHUB_REGISTRY_CA_CONFIG}

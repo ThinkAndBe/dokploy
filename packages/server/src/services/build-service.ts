@@ -1,3 +1,5 @@
+import {recycleSchema} from './version-recycle';
+import {inspectProjectTest} from './test-source';
 import http from 'node:http';
 import {randomUUID,randomBytes,timingSafeEqual,createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
@@ -43,16 +45,14 @@ export async function startBuild(a:Actor,input:{projectId:string;commit?:string;
  const [prior]=await sql`select * from apphub_build_job where organization_id=${a.organizationId} and created_by=${a.id} and request_key=${input.requestKey}`;
  if(prior){if(prior.project_id!==input.projectId||(input.commit&&prior.commit_sha!==input.commit))throw new Error('请求标识已用于其他版本');return {id:prior.id};}
  const state=await buildStatus(a,input.projectId);if(!state.online)throw new Error('构建执行器当前离线，请稍后重试');
- let commit=input.commit;if(!commit){const v=await repositoryVersions(project.projectId,project.giteaRepoUrl!,1);commit=v.tags[0]?.sha||v.commits[0]?.sha;}
+ let commit=input.commit;if(!commit){const v=await repositoryVersions(project.projectId,project.giteaRepoUrl!,1,a.organizationId);commit=v.commits[0]?.sha||v.tags[0]?.sha;}
  if(!commit||!/^[a-f0-9]{40}$/.test(commit))throw new Error('请先上传代码并保存版本');
- const tree=await browseCode(codeActor(a),{projectId:input.projectId,commit,path:''});if(tree.kind!=='directory')throw new Error('代码版本不可读取');
- let manifest:any={type:'dockerfile'};
- if(tree.entries.some(f=>f.name==='apphub.json')){const file=await browseCode(codeActor(a),{projectId:input.projectId,commit,path:'apphub.json'});try{manifest=JSON.parse(file.content);}catch{throw new Error('apphub.json 不是有效 JSON');}}
- else if(!tree.entries.some(f=>f.name==='Dockerfile'))throw new Error('项目需要 Dockerfile 或 apphub.json 构建说明，请让开发工具补齐后保存新版本');
- const parsed=buildManifest.parse(manifest);if(parsed.type==='dotnet'&&parsed.entry?.endsWith('/Epos.Management.csproj'))parsed.storage={target:'/data'};
+ const compatibility=await inspectProjectTest(a,input.projectId,commit);
+ if(!compatibility.runnable||!compatibility.manifest)throw new Error('测试配置未就绪：'+compatibility.issues.filter(i=>i.level==='error').map(i=>i.path+'：'+i.message).join('；'));
+ const parsed=compatibility.manifest;if(parsed.type==='dotnet'&&parsed.entry?.endsWith('/Epos.Management.csproj'))parsed.storage={target:'/data'};
  const [last]=await sql`select manifest from apphub_build_job where project_id=${input.projectId} and status='ready' order by created_at desc limit 1`;
  if(last&&(last.manifest.port!==parsed.port||JSON.stringify(last.manifest.storage)!==JSON.stringify(parsed.storage)))throw new Error('测试服务端口或数据目录发生变化，请管理员调整已有服务后再测试');
- await ensureProject(a,input.projectId);
+ await ensureProject(a,input.projectId);await recycleSchema();
  return sql.begin(async q=>{await q`select pg_advisory_xact_lock(hashtext(${input.projectId}),63001)`;
  const [running]=await q`select * from apphub_build_job where project_id=${input.projectId} and status in ('queued','building','built','deploying') order by created_at desc limit 1`;
  if(running){if(running.commit_sha===commit)return {id:running.id};throw new Error('项目已有任务正在执行，请等待或取消该构建');}

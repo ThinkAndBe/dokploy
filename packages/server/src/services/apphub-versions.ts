@@ -16,11 +16,12 @@ export async function repositoryVersions(projectId:string,repositoryUrl:string,p
   const data:unknown=await r.json(); if(!Array.isArray(data))throw new Error("版本服务返回了无法识别的数据");return data;
  }
  const [tags,commits]=await Promise.all([get("tags"),get("commits")]);
+ const removed=organizationId?await (await import('./version-recycle')).recycledNames(organizationId,projectId):new Set<string>();
  const {commitActor,commitPresentation}=await import('./user-name-policy');
  const actorIds=commits.map(c=>commitActor(String(c.commit?.message||'')));
  const names=organizationId&&actorIds.some(Boolean)?await (await import('./user-names')).userNames(organizationId,actorIds):new Map<string,string>();
  return {page,hasMore:tags.length===20||commits.length===20,
- tags:tags.map(t=>({name:String(t.name||""),sha:String(t.commit?.sha||t.id||"")})),
+ tags:tags.filter(t=>!removed.has(String(t.name||''))).map(t=>({name:String(t.name||""),sha:String(t.commit?.sha||t.id||"")})),
  commits:commits.map(c=>({sha:String(c.sha||""),...(()=>{const display=commitPresentation(String(c.commit?.message||""),String(c.commit?.author?.name||""),names);return {...display,message:display.message.slice(0,2000)};})(),date:String(c.commit?.author?.date||"")}))};
 }
 

@@ -49,3 +49,6 @@ yarn-error.log*
 .credentials
 # Runtime configuration is supplied outside source control.
 .env.production
+
+# Build executor unit test caches
+ops/build-worker/**/__pycache__/

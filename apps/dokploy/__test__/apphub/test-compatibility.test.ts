@@ -1,0 +1,25 @@
+import {describe,it,expect} from 'vitest';
+import {inspectTestSource} from '../../../../packages/server/src/services/test-compatibility';
+import {buildManifest} from '../../../../packages/server/src/services/build-policy';
+import {versionBlockReason} from '../../../../packages/server/src/services/version-recycle-policy';
+const check=(files:Record<string,string>)=>inspectTestSource(Object.entries(files).map(([path,data])=>({path,data:Buffer.from(data)})));
+describe('project test compatibility',()=>{
+ it('infers a single explicit Docker HTTP port',()=>{const r=check({Dockerfile:'FROM node:24\nEXPOSE 3000\nCMD ["node","app.js"]'});expect(r.runnable).toBe(true);expect(r.manifest?.port).toBe(3000);});
+ it.each(['EXPOSE 3000 80','EXPOSE $PORT','EXPOSE 3000/udp',''])('blocks ambiguous port %s',expose=>expect(check({Dockerfile:'FROM node:24\n'+expose}).runnable).toBe(false));
+ it('supports explicit Docker settings and BuildKit syntax',()=>{const r=check({'apphub.json':'{"port":3000,"health":"/health"}',Dockerfile:'FROM node:24\nRUN --mount=type=cache,target=/tmp npm install\nEXPOSE 3000 80'});expect(r.runnable).toBe(true);expect(r.issues.some(i=>i.message.includes('BuildKit'))).toBe(true);});
+ it('blocks missing source entry',()=>expect(check({'apphub.json':'{"type":"dockerfile","dockerfile":"absent"}'}).runnable).toBe(false));
+ it('accepts a plain static site with health',()=>{const r=check({'index.html':'<!doctype html>'});expect(r.runnable).toBe(true);expect(r.manifest).toMatchObject({type:'static',output:'.',health:'/health'});});
+ it('recognizes Vite, retaining npm lockfile behavior',()=>{const r=check({'package.json':'{"scripts":{"build":"vite build"},"devDependencies":{"vite":"7"}}','index.html':'<html>','package-lock.json':'{}'});expect(r.runnable).toBe(true);expect(r.manifest?.entry).toBe('package.json');expect(r.issues.some(i=>i.message.includes('npm install'))).toBe(false);});
+ it('requires a start script for Node',()=>{expect(check({'apphub.json':'{"type":"node","entry":"package.json","port":3000}', 'package.json':'{}'}).runnable).toBe(false);expect(check({'apphub.json':'{"type":"node","entry":"package.json","port":3000}', 'package.json':'{"scripts":{"start":"node app.js"}}'}).runnable).toBe(true);});
+ it('does not pretend a workspace or multi-service repository is executable',()=>{expect(check({'package.json':'{"workspaces":["packages/*"]}'}).runnable).toBe(false);expect(check({'frontend/main.ts':'source','services/api.py':'source'}).runnable).toBe(false);});
+ it('supports explicit nested context and rejects path escape',()=>{expect(check({'apphub.json':'{"context":"frontend","port":3000}','frontend/Dockerfile':'FROM node:24'}).runnable).toBe(true);expect(check({'apphub.json':'{"context":"../frontend","port":3000}'}).runnable).toBe(false);expect(buildManifest.safeParse({type:'static',output:'.',context:'.'}).success).toBe(false);});
+ it('accepts one .NET 10 Web project and blocks ambiguous/other runtimes',()=>{const cs='<Project Sdk="Microsoft.NET.Sdk.Web"><TargetFramework>net10.0</TargetFramework></Project>';expect(check({'src/Web.csproj':cs}).runnable).toBe(true);expect(check({'a.csproj':cs,'b.csproj':cs}).runnable).toBe(false);expect(check({'a.csproj':cs.replace('net10','net8')}).runnable).toBe(false);});
+ it('recognizes inherited framework in Directory.Build.props',()=>{expect(check({'src/Web.csproj':'<Project Sdk="Microsoft.NET.Sdk.Web"/>','Directory.Build.props':'<Project><PropertyGroup><TargetFramework> net10.0 </TargetFramework></PropertyGroup></Project>'}).runnable).toBe(true);});
+ it('rejects invalid manifests and source-provided host permissions',()=>{expect(check({'apphub.json':'{bad}'}).runnable).toBe(false);expect(check({'apphub.json':'{"privileged":true}','Dockerfile':'FROM node:24'}).runnable).toBe(false);});
+ it('warns that Compose dependencies do not automatically run',()=>{const r=check({'Dockerfile':'FROM node:24\nEXPOSE 3000','docker-compose.yml':'services: {}'});expect(r.runnable).toBe(true);expect(r.issues.some(i=>i.path==='Compose')).toBe(true);});
+});
+describe('recoverable version protection',()=>{
+ const empty={head:false,active:false,current:false,formal:false,request:false};
+ it('allows unused old versions',()=>expect(versionBlockReason(empty)).toBe(''));
+ it.each(['head','active','current','formal','request'] as const)('protects %s references',key=>expect(versionBlockReason({...empty,[key]:true})).not.toBe(''));
+});

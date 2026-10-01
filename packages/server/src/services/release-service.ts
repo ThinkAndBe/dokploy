@@ -3,7 +3,7 @@ import {buildSchema} from './build-store';
 import {databaseCompose,databaseIdentity} from './database-policy';
 import {databaseCredential,databaseStats} from './managed-databases';
 import {randomUUID} from 'node:crypto';
-import {parse,stringify} from 'yaml';
+import {parseReleaseCompose,stringifyReleaseCompose} from './release-compose-policy';
 import {eq,and} from 'drizzle-orm';
 import {db} from '../db';
 import {compose,environments,projects,member} from '../db/schema';
@@ -26,7 +26,7 @@ export async function authorizeTarget(a:Actor,id:string){
 export async function catalog(a:Actor){
  const list=[];
  for(const t of await releaseTargets()){if(t.organizationId!==a.organizationId)continue;try{const {member:m,admin}=await authorizeTarget(a,t.environmentId);const e=await db.query.environments.findFirst({where:eq(environments.environmentId,t.environmentId),with:{project:true}});const services=[];
- for(const id of t.serviceIds){if(t.tier==='test'&&!admin&&!m.accessedServices.includes(id))continue;const c=await db.query.compose.findFirst({where:eq(compose.composeId,id)});if(c&&c.environmentId===t.environmentId){const doc=parse(c.composeFile);services.push({id,name:c.name,components:Object.entries(doc?.services??{}).map(([name,v]:[string,any])=>({name,image:v.image,replicas:v.deploy?.replicas??1}))});}}
+ for(const id of t.serviceIds){if(t.tier==='test'&&!admin&&!m.accessedServices.includes(id))continue;const c=await db.query.compose.findFirst({where:eq(compose.composeId,id)});if(c&&c.environmentId===t.environmentId){const doc=parseReleaseCompose(c.composeFile);services.push({id,name:c.name,components:Object.entries(doc?.services??{}).map(([name,v]:[string,any])=>({name,image:v.image,replicas:v.deploy?.replicas??1}))});}}
  list.push({...t,databaseImages:admin?t.databaseImages:undefined,environmentName:e?.name,projectName:e?.project.name,services});}catch{}}
  return list;
 }
@@ -48,7 +48,7 @@ export async function submitPlan(a:Actor,raw:unknown){
   if(t.tier==='test'&&!admin&&!m.accessedServices.includes(c.serviceId))throw new Error('没有目标应用权限');
   const before=await db.query.compose.findFirst({where:eq(compose.composeId,c.serviceId),with:{domains:true,mounts:true}});
   if(!before||before.environmentId!==t.environmentId||before.sourceType!=='raw'||before.composeType!=='stack'||before.serverId||before.command)throw new Error('仅支持运维批准的本机 raw Swarm 编排');
-  document=parse(before.composeFile,{maxAliasCount:0});if(!document?.services?.[c.component])throw new Error('目标组件不存在');
+  document=parseReleaseCompose(before.composeFile);if(!document?.services?.[c.component])throw new Error('目标组件不存在');
   if(before.autoDeploy)throw new Error('请先由运维关闭该应用的自动触发部署');
   baseHash=composeFingerprint(before);serviceId=c.serviceId;serviceName=before.name;
   const component=document.services[c.component];if(t.managedBuild){delete component.tmpfs;component.volumes=[...(component.volumes||[]).filter((v:any)=>v.target!=='/tmp'),{type:'tmpfs',target:'/tmp',tmpfs:{size:134217728}}];if(process.env.APPHUB_PREVIEW_BASE_DOMAIN&&component.environment?.EPOS_SERVICE_MODE==='report')component.environment.EPOS_EMBED_ORIGIN=new URL(process.env.APPHUB_PUBLIC_URL!).origin;component.deploy={...component.deploy,restart_policy:{condition:'on-failure',delay:'5s',max_attempts:3,window:'120s'}};}diff.push({field:c.component+'.image',before:component.image,after:c.image});component.image=c.image;
@@ -84,7 +84,7 @@ export async function submitPlan(a:Actor,raw:unknown){
   handoff={...handoff,loginUrl:null,notes:[...(handoff.notes||[]),'测试应用仅允许项目授权成员从 AppHub 打开，IP 直连需要同等授权。']};
  }
  handoff={...handoff,settings:[...(handoff.settings??[]).filter((r:any)=>r.label!=='本次镜像摘要'&&r.label!=='发布方案'),{label:'本次镜像摘要',value:c.image},{label:'发布方案',value:id}],updatedAt:new Date().toISOString()};
- const payload={input,requestHash:digest(input),compose:stringify(document),serviceName,diff,handoff,policyHash:digest(t),baseHash};
+ const payload={input,requestHash:digest(input),compose:stringifyReleaseCompose(document),serviceName,diff,handoff,policyHash:digest(t),baseHash};
  return visiblePlan(await insertPlan({id,organization_id:a.organizationId,project_id:t.projectId,environment_id:t.environmentId,service_id:serviceId,created_by:a.id,title:input.title,tier:t.tier,status:t.tier==='test'?'awaiting_confirmation':'awaiting_approval',plan_hash:digest(payload),base_hash:baseHash,payload},input.idempotencyKey));
 }
 export async function accessiblePlan(a:Actor,id:string){const [p]=await releaseSql<Plan[]>`select * from apphub_release_plan where id=${id} and organization_id=${a.organizationId}`;if(!p)throw new Error('方案不存在或未授权');const access=await authorizeTarget(a,p.environment_id);if(!access.admin&&p.payload.input.configuration.kind==='database')throw new Error('数据库管理仅限管理员');if(!access.admin&&p.created_by!==a.id&&p.tier==='test'&&!access.member.accessedServices.includes(p.service_id))throw new Error('方案不存在或未授权');return {plan:p,...access};}
