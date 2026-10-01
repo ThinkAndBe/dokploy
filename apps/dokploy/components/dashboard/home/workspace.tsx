@@ -1,3 +1,4 @@
+import {ProjectProfile} from '../projects/project-profile';
 import {ProjectRuntimeSummary} from '../projects/project-runtime-summary';
 import {StartProjectTest} from '@/components/dashboard/projects/start-project-test';
 import { ProjectSharing } from '../projects/sharing';
@@ -22,8 +23,8 @@ export function AppHubWorkspace(){
  <div className="flex items-center gap-3"><Input aria-label="搜索我的项目" placeholder="搜索项目" value={search} onChange={e=>setSearch(e.target.value)} className="max-w-md"/><Button variant="outline" onClick={()=>void q.refetch()} disabled={q.isFetching}>刷新</Button></div>
  {q.isPending?<p>正在加载项目…</p>:q.error?<p role="alert">暂时无法读取项目，请刷新重试。</p>:rows.length===0?<div className="rounded-xl border p-10 text-center"><h2>暂无项目</h2><p className="text-muted-foreground mt-2">创建一个项目开始，或请项目负责人邀请你加入。</p></div>:rows.map(p=>{
  const services=p.environments.filter(e=>!e.environmentId.startsWith("build-")).flatMap(e=>e.services);
- return <section className="rounded-xl border bg-card" key={p.projectId}><div className="p-6 space-y-4"><div><h2 className="text-xl font-semibold" translate="no">{p.name}</h2>{p.description&&<p className="text-sm text-muted-foreground mt-1" translate="no">{p.description}</p>}</div>
- <div className="flex flex-wrap gap-2"><ProjectVersions projectId={p.projectId}/><ProjectSharing projectId={p.projectId}/></div>
+ return <section className="rounded-xl border bg-card" key={p.projectId}><div className="p-6 space-y-4"><div><h2 className="text-xl font-semibold" translate="no">{p.name}</h2>{p.description&&<p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap break-words" translate="no">{p.description}</p>}</div>
+ <div className="flex flex-wrap gap-2"><ProjectProfile projectId={p.projectId}/><ProjectVersions projectId={p.projectId}/><ProjectSharing projectId={p.projectId}/></div>
  <ProjectRuntimeSummary projectId={p.projectId}/>
  </div></section>})}
  </main>;

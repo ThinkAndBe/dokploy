@@ -1,0 +1,15 @@
+import {beforeEach,it,expect,vi} from 'vitest';
+const m=vi.hoisted(()=>({sql:vi.fn(),access:vi.fn(),write:vi.fn(),role:vi.fn(),audit:vi.fn()}));
+vi.mock('@dokploy/server/services/release-store',()=>({releaseSql:m.sql}));
+vi.mock('@dokploy/server/services/apphub-rbac',()=>({authorizedProject:m.access,assertWrite:m.write,memberRole:m.role,audit:m.audit}));
+import {readProjectProfile,saveProjectProfile} from '@dokploy/server/services/project-profile';
+import {projectProfileInput} from '@dokploy/server/services/project-profile-policy';
+const a={id:'editor',organizationId:'org'},input={projectId:'p',name:'中文项目',description:'中文说明\n第二行：AI 网关 🚀',expected:{name:'old',description:'损坏\uFFFD'}};
+beforeEach(()=>{vi.resetAllMocks();m.role.mockResolvedValue({effectiveRole:'developer'});m.sql.mockResolvedValue([{projectId:'p',name:input.name,description:input.description}]);});
+it('stores Chinese, newlines and emoji as SQL parameters and updates only project metadata',async()=>{expect(await saveProjectProfile(a,input)).toEqual({projectId:'p',name:input.name,description:input.description});const [parts,...args]=m.sql.mock.calls[0]!;expect(parts.join('?')).toMatch(/^update project set name=\?,description=\?/);expect(parts.join('?')).not.toMatch(/env|gitea|organizationId.*set/);expect(args).toEqual([input.name,input.description,'p','org','old','损坏\uFFFD']);expect(m.audit).toHaveBeenCalledWith(a,'update_project_profile','p');});
+it('denies an unauthorized project before updating any metadata',async()=>{m.access.mockRejectedValue(Error('未授权'));await expect(saveProjectProfile(a,input)).rejects.toThrow('未授权');expect(m.sql).not.toHaveBeenCalled();});
+it('denies a viewer before SQL writes',async()=>{m.write.mockRejectedValue(Error('只读'));await expect(saveProjectProfile(a,input)).rejects.toThrow('只读');expect(m.sql).not.toHaveBeenCalled();});
+it('detects another editor changing metadata instead of overwriting it',async()=>{m.sql.mockResolvedValue([]);await expect(saveProjectProfile(a,input)).rejects.toThrow('其他人');expect(m.audit).not.toHaveBeenCalled();});
+it('accepts fixing already damaged original text but rejects newly damaged input and sensitive fields',()=>{expect(projectProfileInput.safeParse(input).success).toBe(true);for(const extra of [{description:'乱码\uFFFD'},{name:'坏\uFFFD'},{env:'PRIVATE'},{organizationId:'other'},{ownerId:'other'}])expect(projectProfileInput.safeParse({...input,...extra}).success).toBe(false);});
+it('supports empty descriptions and null originals',async()=>{await saveProjectProfile(a,{...input,description:'',expected:{name:'old',description:null}});expect(m.sql.mock.calls[0]!.at(-1)).toBeNull();});
+it('checks access before reading metadata and returns a read-only flag',async()=>{m.role.mockResolvedValue({effectiveRole:'viewer'});expect((await readProjectProfile(a,'p')).canEdit).toBe(false);expect(m.access).toHaveBeenCalledWith(a,'p');});

@@ -1,3 +1,4 @@
+import {projectNameText,projectDescriptionText} from '../../services/project-profile-policy';
 import { relations } from "drizzle-orm";
 import { pgTable, text } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -39,8 +40,8 @@ export const projectRelations = relations(projects, ({ many, one }) => ({
 
 const createSchema = createInsertSchema(projects, {
 	projectId: z.string().min(1),
-	name: z.string().min(1),
-	description: z.string().optional(),
+	name: projectNameText,
+	description: projectDescriptionText.optional(),
 	env: z.string().optional(),
 });
 

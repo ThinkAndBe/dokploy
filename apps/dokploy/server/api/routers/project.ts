@@ -1,3 +1,5 @@
+import {readProjectProfile,saveProjectProfile} from '@dokploy/server/services/project-profile';
+import {projectProfileInput} from '@dokploy/server/services/project-profile-policy';
 import {listRecycled,changeRecycled} from '@dokploy/server/services/version-recycle';
 import {versionInput,versionListOutput} from '@dokploy/server/services/version-api';
 import {browseCode,commitCode} from '@dokploy/server/services/project-code';
@@ -79,6 +81,14 @@ import { getBillingStatus } from "@/server/utils/billing";
 import {sharingDetails,changeSharing,initializeProjectOwner} from '@dokploy/server/services/project-sharing';
 const sharingActor=(ctx:any)=>({id:ctx.user.id,organizationId:ctx.session.activeOrganizationId,apiKey:ctx.req.headers['x-api-key']});
 export const projectRouter = createTRPCRouter({
+ profile:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200)})).query(async({ctx,input})=>{
+  try{return await readProjectProfile(sharingActor(ctx),input.projectId);}catch{throw new TRPCError({code:'NOT_FOUND',message:'项目不存在或尚未授权'});}
+ }),
+ updateProfile:protectedProcedure.input(projectProfileInput).mutation(async({ctx,input})=>{
+  if(ctx.req.headers['x-api-key']||!process.env.APPHUB_PUBLIC_URL||ctx.req.headers.origin!==new URL(process.env.APPHUB_PUBLIC_URL).origin)throw new TRPCError({code:'FORBIDDEN',message:'请登录项目页面修改项目资料'});
+  try{return await saveProjectProfile(sharingActor(ctx),input);}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'项目资料保存失败'});}
+ }),
+
  recycledVersions:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200)})).query(({ctx,input})=>listRecycled(sharingActor(ctx),input.projectId)),
  changeVersion:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200),name:versionInput.shape.name,commit:versionInput.shape.commit,action:z.enum(['delete','restore'])})).mutation(async({ctx,input})=>{
   if(ctx.req.headers.origin!==process.env.APPHUB_PUBLIC_URL?.replace(/\/$/,''))throw new TRPCError({code:'FORBIDDEN',message:'请从项目页面管理版本'});

@@ -1,10 +1,11 @@
+import {projectNameText,projectDescriptionText} from './project-profile-policy';
 import {z} from 'zod';
 import {randomUUID,createHash} from 'node:crypto';
 import {releaseSql as sql} from './release-store';
 import {authenticateMcp,memberRole,authorizedProject,audit} from './apphub-rbac';
 import {canCreateProject,effectiveRole} from './apphub-role-policy';
 import {ensureProjectRepository} from './project-repository';
-const inputSchema=z.object({name:z.string().trim().min(1).max(100),description:z.string().max(2000).default(''),requestKey:z.string().uuid()}).strict();
+const inputSchema=z.object({name:projectNameText,description:projectDescriptionText.default(''),requestKey:z.string().uuid()}).strict();
 export async function createMcpProject(auth:Awaited<ReturnType<typeof authenticateMcp>>,raw:unknown){
  const input=inputSchema.parse(raw),a=auth.actor;
  const m=await memberRole(a);
