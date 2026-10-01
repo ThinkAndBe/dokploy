@@ -1,0 +1,6 @@
+import {it,expect} from 'vitest';
+import {navigationArea} from '../../lib/navigation-area';
+it.each(['owner','admin'])('keeps personal pages in workspace for %s',role=>{for(const path of ['/dashboard/mcp','/dashboard/code','/dashboard/settings/profile','/dashboard/settings/sessions','/dashboard/preview-open'])expect(navigationArea(role,path,{mode:'operations',view:'operations'})).toBe('workspace');});
+it('switches home and release pages only through explicit operations links',()=>{expect(navigationArea('admin','/dashboard/home')).toBe('workspace');expect(navigationArea('admin','/dashboard/home',{view:'operations'})).toBe('operations');expect(navigationArea('admin','/dashboard/releases')).toBe('workspace');expect(navigationArea('admin','/dashboard/releases',{mode:'operations'})).toBe('operations');});
+it.each(['/dashboard/databases','/dashboard/roles','/dashboard/identity','/dashboard/settings/users','/dashboard/project-operations','/dashboard/monitoring'])('places administrative route %s in operations',path=>expect(navigationArea('admin',path)).toBe('operations'));
+it.each(['member',undefined])('does not expose an admin menu to %s',role=>{expect(navigationArea(role,'/dashboard/mcp')).toBe('workspace');expect(navigationArea(role,'/dashboard/home',{view:'operations'})).toBe('workspace');});

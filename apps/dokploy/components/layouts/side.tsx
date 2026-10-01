@@ -1,4 +1,5 @@
 "use client";
+import {navigationArea} from '@/lib/navigation-area';
 import type { inferRouterOutputs } from "@trpc/server";
 import {
 	Activity,
@@ -167,11 +168,14 @@ type Menu = {
 // The `isEnabled` function is called to determine if the item should be displayed
 const MENU: Menu = {
 	home: [
+        {title:"管理后台首页",url:"/dashboard/home?view=operations",icon:House,isSingle:true},
+        {title:"角色与权限",url:"/dashboard/roles",icon:ShieldCheck,isSingle:true},
+        {title:"用户与零信任",url:"/dashboard/identity",icon:ShieldCheck,isSingle:true},
 		{title:"上线审批与发布",url:"/dashboard/releases?mode=operations",icon:ClipboardList,isSingle:true},
         {title:"数据库与连接池",url:"/dashboard/databases",icon:ClipboardList,isSingle:true},
         {
 			isSingle: true,
-			title: "我的工作台",
+			title: "返回我的工作台",
 			url: "/dashboard/home",
 			icon: House,
 		},
@@ -506,7 +510,7 @@ function createMenuForAuthUser(opts: {
 
  if(!opts.advanced){
   const admin=opts.auth?.role==='owner'||opts.auth?.role==='admin';
-  return {home:[{title:'我的项目',url:'/dashboard/home',icon:House},{title:'AI 接入',url:'/dashboard/mcp',icon:ShieldCheck},...(admin?[{title:'数据库',url:'/dashboard/databases',icon:HardDrive},{title:'角色与权限',url:'/dashboard/roles',icon:ShieldCheck},{title:'用户与零信任',url:'/dashboard/identity',icon:ShieldCheck},{title:'管理后台',url:'/dashboard/home?view=operations',icon:ShieldCheck}]:[])],settings:filterEnabled(MENU.settings).filter(item=>item.isSingle!==false&&['/dashboard/settings/profile','/dashboard/settings/sessions'].includes(item.url)),help:[]};
+  return {home:[{title:'我的项目',url:'/dashboard/home',icon:House},{title:'AI 接入',url:'/dashboard/mcp',icon:ShieldCheck},...(admin?[{title:'管理后台',url:'/dashboard/home?view=operations',icon:ShieldCheck}]:[])],settings:filterEnabled(MENU.settings).filter(item=>item.isSingle!==false&&['/dashboard/settings/profile','/dashboard/settings/sessions'].includes(item.url)),help:[]};
  }
 
 	return {
@@ -963,8 +967,7 @@ export default function Page({ children }: Props) {
 	});
 
 	const router=useRouter();
- const simplePaths=['/dashboard/identity','/dashboard/project-operations','/dashboard/home','/dashboard/releases','/dashboard/databases','/dashboard/code','/dashboard/settings/profile','/dashboard/settings/sessions'];
- const advanced=(auth?.role==='owner'||auth?.role==='admin')&&(router.query.view==='operations'||router.query.mode==='operations'||!simplePaths.includes(pathname||''));
+ const advanced=navigationArea(auth?.role,pathname||'',router.query)==='operations';
  const includesProjects = pathname?.includes("/dashboard/project");
 	const { data: isCloud } = api.settings.isCloud.useQuery();
 
@@ -1018,7 +1021,7 @@ export default function Page({ children }: Props) {
 				</SidebarHeader>
 				<SidebarContent>
 					<SidebarGroup>
-						<SidebarGroupLabel>Home</SidebarGroupLabel>
+						<SidebarGroupLabel>{advanced?'管理后台':'我的工作台'}</SidebarGroupLabel>
 						<SidebarMenu>
 							{filteredHome.map((item) => {
 								const isSingle = item.isSingle !== false;
@@ -1107,7 +1110,7 @@ export default function Page({ children }: Props) {
 						</SidebarMenu>
 					</SidebarGroup>
 					<SidebarGroup>
-						<SidebarGroupLabel>Settings</SidebarGroupLabel>
+						<SidebarGroupLabel>{advanced?'后台设置':'个人设置'}</SidebarGroupLabel>
 						<SidebarMenu className="gap-1">
 							{filteredSettings.map((item) => {
 								const isSingle = item.isSingle !== false;

@@ -1,3 +1,4 @@
+import {navigationArea} from '@/lib/navigation-area';
 import { authClient } from "@/lib/auth-client";
 import { SearchCommand } from "@/components/dashboard/search-command";
 import { translateText } from "@/components/i18n-zh/translate";
@@ -59,7 +60,7 @@ export const DashboardLayout = ({ children, metaName }: Props) => {
 					</title>
 				</Head>
 			)}
-			<SearchCommand/><Page>{children}</Page>
+			{navigationArea(actor?.role,router.pathname,router.query)==='operations'&&<SearchCommand/>}<Page>{children}</Page>
 			{isChatEnabled && (
 				<>
 					<HubSpotWidget />
