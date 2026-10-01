@@ -99,7 +99,7 @@ export const projectRouter = createTRPCRouter({
   const project=await db.query.projects.findFirst({where:and(eq(projects.projectId,input.projectId),eq(projects.organizationId,ctx.session.activeOrganizationId)),columns:{projectId:true,giteaRepoUrl:true}});
   if(!project || !accessScope(member).project(input.projectId))throw new TRPCError({code:"NOT_FOUND",message:"项目不存在或尚未授权"});
   if(!project.giteaRepoUrl)throw new TRPCError({code:"PRECONDITION_FAILED",message:"项目尚未关联代码仓库，请联系运维"});
-  try{return await repositoryVersions(project.projectId,project.giteaRepoUrl,input.page);}catch{throw new TRPCError({code:"BAD_GATEWAY",message:"暂时无法读取版本记录，请稍后重试或联系运维"});}
+  try{return await repositoryVersions(project.projectId,project.giteaRepoUrl,input.page,ctx.session.activeOrganizationId);}catch{throw new TRPCError({code:"BAD_GATEWAY",message:"暂时无法读取版本记录，请稍后重试或联系运维"});}
  }),
 
  createVersion:protectedProcedure.meta({openapi:{method:'POST',path:'/project.createVersion',protect:true,tags:['Project versions'],summary:'为固定代码提交建立不可覆盖的版本'}}).input(versionInput).output(z.object({name:z.string(),sha:z.string(),created:z.boolean()})).mutation(async({ctx,input})=>{

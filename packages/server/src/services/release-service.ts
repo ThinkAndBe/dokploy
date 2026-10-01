@@ -11,6 +11,8 @@ import {findMemberByUserId} from './permission';
 import {readHandoff} from './apphub-handoff';
 import {digest,generatedWebCompose,releaseInput,releaseTargets,requireInteractive,requireReviewer,validateConfiguration,type ReleaseInput,type ReleaseTarget} from './release-policy';
 import {releaseSql,event,insertPlan,visiblePlan,type Plan} from './release-store';
+import {userNames} from './user-names';
+import {actorName} from './user-name-policy';
 export type Actor={id:string;organizationId:string;apiKey?:unknown};
 export async function authorizeTarget(a:Actor,id:string){
  const t=(await releaseTargets()).find(t=>t.environmentId===id&&t.organizationId===a.organizationId);
@@ -86,8 +88,8 @@ export async function submitPlan(a:Actor,raw:unknown){
  return visiblePlan(await insertPlan({id,organization_id:a.organizationId,project_id:t.projectId,environment_id:t.environmentId,service_id:serviceId,created_by:a.id,title:input.title,tier:t.tier,status:t.tier==='test'?'awaiting_confirmation':'awaiting_approval',plan_hash:digest(payload),base_hash:baseHash,payload},input.idempotencyKey));
 }
 export async function accessiblePlan(a:Actor,id:string){const [p]=await releaseSql<Plan[]>`select * from apphub_release_plan where id=${id} and organization_id=${a.organizationId}`;if(!p)throw new Error('方案不存在或未授权');const access=await authorizeTarget(a,p.environment_id);if(!access.admin&&p.payload.input.configuration.kind==='database')throw new Error('数据库管理仅限管理员');if(!access.admin&&p.created_by!==a.id&&p.tier==='test'&&!access.member.accessedServices.includes(p.service_id))throw new Error('方案不存在或未授权');return {plan:p,...access};}
-export async function listPlans(a:Actor){const rows=await releaseSql<Plan[]>`select * from apphub_release_plan where organization_id=${a.organizationId} order by created_at desc limit 100`;const result=[];for(const p of rows){try{await accessiblePlan(a,p.id);result.push(visiblePlan(p));}catch{}}return result;}
-export async function detailPlan(a:Actor,id:string){const {plan:p,admin}=await accessiblePlan(a,id);const events=await releaseSql`select actor,action,note,created_at from apphub_release_event where plan_id=${id} order by id`;return {...visiblePlan(p),events,canApprove:admin&&p.created_by!==a.id&&!a.apiKey,canConfirm:!a.apiKey&&(admin||p.created_by===a.id)};}
+export async function listPlans(a:Actor){const rows=await releaseSql<Plan[]>`select * from apphub_release_plan where organization_id=${a.organizationId} order by created_at desc limit 100`;const result=[];for(const p of rows){try{await accessiblePlan(a,p.id);result.push(visiblePlan(p));}catch{}}const names=await userNames(a.organizationId,result.flatMap(p=>[p.createdBy,p.approvedBy]));return result.map(p=>({...p,createdByName:actorName(p.createdBy,names),approvedByName:p.approvedBy?actorName(p.approvedBy,names):null}));}
+export async function detailPlan(a:Actor,id:string){const {plan:p,admin}=await accessiblePlan(a,id);const events=await releaseSql`select actor,action,note,created_at from apphub_release_event where plan_id=${id} order by id`;const names=await userNames(a.organizationId,[p.created_by,p.approved_by,...events.map(e=>String(e.actor))]);return {...visiblePlan(p),createdByName:actorName(p.created_by,names),approvedByName:p.approved_by?actorName(p.approved_by,names):null,events:events.map(e=>({...e,actorName:actorName(String(e.actor),names)})),canApprove:admin&&p.created_by!==a.id&&!a.apiKey,canConfirm:!a.apiKey&&(admin||p.created_by===a.id)};}
 export async function revalidate(p:Plan){
  if(digest(p.payload)!==p.plan_hash)throw new Error('方案内容校验失败');
  const a={id:p.created_by,organizationId:p.organization_id};const {target:t,member:m,admin}=await authorizeTarget(a,p.environment_id);

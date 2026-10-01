@@ -95,7 +95,7 @@ export const ShowUsers = () => {
 										<Table>
 											<TableHeader>
 												<TableRow>
-													<TableHead className="w-[100px]">Email</TableHead>
+													<TableHead className="w-[180px]">姓名</TableHead>
 													<TableHead className="text-center">Role</TableHead>
 													<TableHead className="text-center">Status</TableHead>
 													<TableHead className="text-center">2FA</TableHead>
@@ -108,6 +108,12 @@ export const ShowUsers = () => {
 											</TableHeader>
 											<TableBody>
 												{data?.map((member) => {
+													const displayName = [member.user.firstName, member.user.lastName]
+														.map((part) => part?.trim())
+														.filter(Boolean)
+														.join(" ") || "未提供姓名";
+													const email = member.user.email.trim();
+													const businessEmail = email.toLowerCase().endsWith("@identity.apphub.invalid") ? "" : email;
 													const currentUserRole = data?.find(
 														(m) => m.user.id === session?.user?.id,
 													)?.role;
@@ -155,8 +161,9 @@ export const ShowUsers = () => {
 
 													return (
 														<TableRow key={member.id}>
-															<TableCell className="w-[100px]">
-																{member.user.email}
+															<TableCell className="w-[180px]">
+																<span className="font-medium" translate="no">{displayName}</span>
+																{businessEmail && <p className="text-xs text-muted-foreground" translate="no">{businessEmail}</p>}
 																{member.user.id === session?.user?.id && (
 																	<span className="text-muted-foreground ml-1">
 																		(You)
@@ -221,7 +228,7 @@ export const ShowUsers = () => {
 																				<ChangeRole
 																					memberId={member.id}
 																					currentRole={member.role}
-																					userEmail={member.user.email}
+																					userEmail={displayName}
 																				/>
 																			)}
 

@@ -9,6 +9,8 @@ import {testEnvironment,changeTestEnvironment} from './build-environment';
 import {requestPublish} from './publish-request';
 import {accessiblePlan} from './release-service';
 import {createMcpProject} from './mcp-create-project';
+import {userNames} from './user-names';
+import {actorName} from './user-name-policy';
 const pid=z.string().min(1).max(200),sha=z.string().regex(/^[a-f0-9]{40}$/);
 const definitions=[
  ['create_project','创建归当前用户所有的项目及代码仓库，并自动绑定到当前密钥；requestKey 为 UUID，同一请求重试必须复用','create-project',{name:{type:'string'},description:{type:'string'},requestKey:{type:'string'}}],
@@ -33,11 +35,12 @@ export async function callProjectTool(auth:Awaited<ReturnType<typeof authenticat
  const projectId=pid.parse(input.projectId);assertMcpScope(auth.role,auth.key.projects,auth.key.scopes,projectId,d[2]);await authorizedProject(auth.actor,projectId);
  // Only this authenticated, project-scoped adapter delegates to interactive services.
  // The external MCP token is never accepted as a general platform API key.
- const a={...auth.actor,name:'AppHub MCP',email:'mcp@apphub.invalid'};
+ const names=await userNames(auth.actor.organizationId,[auth.actor.id]);
+ const a={...auth.actor,name:actorName(auth.actor.id,names),email:'mcp@apphub.invalid'};
  await audit(a,'mcp:'+name+':requested',projectId);
  try{let result:unknown;
  switch(name){
- case 'list_versions':{const p=await codeProject(a,projectId);result=await repositoryVersions(projectId,p.giteaRepoUrl!,z.number().int().min(1).max(100).default(1).parse(input.page));break;}
+ case 'list_versions':{const p=await codeProject(a,projectId);result=await repositoryVersions(projectId,p.giteaRepoUrl!,z.number().int().min(1).max(100).default(1).parse(input.page),a.organizationId);break;}
  case 'read_code':result=await browseCode(a,{projectId,commit:sha.parse(input.commit),path:z.string().max(1000).default('').parse(input.path)});break;
  case 'preview_code_upload':{const base=z.string().max(11200000).parse(input.zipBase64),buffer=Buffer.from(base,'base64');if(buffer.toString('base64')!==base)throw new Error('ZIP Base64 编码无效');if(buffer.length>8*1024*1024)throw new Error('ZIP 超过 8 MB，请使用项目网页上传');result=await previewCode(a,projectId,buffer,z.boolean().default(false).parse(input.stripRoot));break;}
  case 'save_code_version':{const v=versionInput.parse({projectId,name:input.name,description:input.description,commit:'0'.repeat(40)});result=await commitCode(a,{projectId,previewId:z.string().uuid().parse(input.previewId),name:v.name,description:v.description});break;}

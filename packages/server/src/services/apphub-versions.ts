@@ -7,7 +7,7 @@ export function repositoryPath(projectId: string, repositoryUrl: string) {
  if(u.origin!==base.origin || u.username || u.password || u.pathname.replace(/\/+$/,"")!==expected || u.search || u.hash) throw new Error("仓库关联需要运维核查");
  return `${(process.env.GITEA_API_URL||base.href).replace(/\/+$/,"")}/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(slug)}`;
 }
-export async function repositoryVersions(projectId:string,repositoryUrl:string,page:number) {
+export async function repositoryVersions(projectId:string,repositoryUrl:string,page:number,organizationId?:string) {
  const base=repositoryPath(projectId,repositoryUrl);
  async function get(route:string) {
   const r=await fetch(`${base}/${route}?limit=20&page=${page}`,{headers:{Authorization:`token ${giteaToken()}`},redirect:"error",signal:AbortSignal.timeout(10000)});
@@ -16,9 +16,12 @@ export async function repositoryVersions(projectId:string,repositoryUrl:string,p
   const data:unknown=await r.json(); if(!Array.isArray(data))throw new Error("版本服务返回了无法识别的数据");return data;
  }
  const [tags,commits]=await Promise.all([get("tags"),get("commits")]);
+ const {commitActor,commitPresentation}=await import('./user-name-policy');
+ const actorIds=commits.map(c=>commitActor(String(c.commit?.message||'')));
+ const names=organizationId&&actorIds.some(Boolean)?await (await import('./user-names')).userNames(organizationId,actorIds):new Map<string,string>();
  return {page,hasMore:tags.length===20||commits.length===20,
  tags:tags.map(t=>({name:String(t.name||""),sha:String(t.commit?.sha||t.id||"")})),
- commits:commits.map(c=>({sha:String(c.sha||""),message:String(c.commit?.message||"").slice(0,2000),author:String(c.commit?.author?.name||""),date:String(c.commit?.author?.date||"")}))};
+ commits:commits.map(c=>({sha:String(c.sha||""),...(()=>{const display=commitPresentation(String(c.commit?.message||""),String(c.commit?.author?.name||""),names);return {...display,message:display.message.slice(0,2000)};})(),date:String(c.commit?.author?.date||"")}))};
 }
 
 // Create an immutable name for an existing commit. Never overwrite or delete a tag.

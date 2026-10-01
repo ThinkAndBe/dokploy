@@ -23,6 +23,10 @@ export const UserNav = () => {
 	const { data } = api.user.get.useQuery();
 	const { data: permissions } = api.user.getPermissions.useQuery();
 	const { data: isCloud } = api.settings.isCloud.useQuery();
+	const displayName = [data?.user?.firstName, data?.user?.lastName]
+		.map((part) => part?.trim())
+		.filter(Boolean)
+		.join(" ") || "未提供姓名";
 
 	// const { mutateAsync } = api.auth.logout.useMutation();
 
@@ -37,17 +41,15 @@ export const UserNav = () => {
 						<AvatarImage
 							className="object-cover"
 							src={data?.user?.image || ""}
-							alt={data?.user?.image || ""}
+							alt={displayName}
 						/>
 						<AvatarFallback className="rounded-lg">
-							{getFallbackAvatarInitials(
-								`${data?.user?.firstName} ${data?.user?.lastName}`.trim(),
-							)}
+							{getFallbackAvatarInitials(displayName)}
 						</AvatarFallback>
 					</Avatar>
 					<div className="grid flex-1 text-left text-sm leading-tight">
-						<span className="truncate font-semibold">Account</span>
-						<span className="truncate text-xs">{data?.user?.email}</span>
+						<span className="truncate font-semibold" translate="no">{displayName}</span>
+						<span className="truncate text-xs">个人账号</span>
 					</div>
 					<ChevronsUpDown className="ml-auto size-4" />
 				</SidebarMenuButton>
@@ -60,9 +62,9 @@ export const UserNav = () => {
 			>
 				<div className="flex items-center justify-between px-2 py-1.5">
 					<DropdownMenuLabel className="flex flex-col">
-						My Account
-						<span className="text-xs font-normal text-muted-foreground">
-							{data?.user?.email}
+						我的账号
+						<span className="text-xs font-normal text-muted-foreground" translate="no">
+							{displayName}
 						</span>
 					</DropdownMenuLabel>
 					<ModeToggle />
