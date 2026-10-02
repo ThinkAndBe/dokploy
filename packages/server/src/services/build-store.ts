@@ -10,6 +10,8 @@ export function buildSchema(){return ready??=(async()=>{await sql.begin(async q=
  await q`create index if not exists apphub_build_environment_event_project on apphub_build_environment_event(project_id,created_at desc)`;
  await q`create table if not exists apphub_preview_access(id uuid primary key,project_id text not null,organization_id text not null,actor text not null,session_id text not null,ticket_hash text unique not null,ticket_expires_at timestamptz not null,token_hash text unique,expires_at timestamptz not null)`;
  await q`create index if not exists apphub_preview_access_expiry on apphub_preview_access(expires_at)`;
+ await q`alter table apphub_build_job add column if not exists artifacts jsonb`;
+ await q`alter table apphub_build_project add column if not exists stack_secrets text`;
  await q`create index if not exists apphub_build_job_project on apphub_build_job(project_id,created_at desc)`;
  });})().catch(e=>{ready=undefined;throw e;});}
 export async function managedBuildTargets(){

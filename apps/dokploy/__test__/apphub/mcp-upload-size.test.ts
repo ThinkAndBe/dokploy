@@ -1,3 +1,4 @@
+vi.mock('@dokploy/server/services/user-names',()=>({userNames:async()=>new Map()}));
 import {it,expect,vi,beforeEach} from 'vitest';
 const mocks=vi.hoisted(()=>({preview:vi.fn()}));
 vi.mock('../../../../packages/server/src/services/apphub-rbac',()=>({authorizedProject:async()=>({}),audit:async()=>{},myProjects:async()=>[]}));

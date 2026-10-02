@@ -1,5 +1,5 @@
-export function testReplicaChange(spec:any,stack:string,action:'stop'|'resume'){
- if(!/^apphubrel-[a-f0-9]+$/.test(stack)||spec?.Name!==stack+'_app'||spec?.Labels?.['com.docker.stack.namespace']!==stack)throw new Error('测试服务归属不一致，请管理员核查');
+export function testReplicaChange(spec:any,stack:string,action:'stop'|'resume',component='app'){
+ if(!/^apphubrel-[a-f0-9]+$/.test(stack)||!/^[a-z][a-z0-9_-]{0,39}$/.test(component)||spec?.Name!==stack+'_'+component||spec?.Labels?.['com.docker.stack.namespace']!==stack)throw new Error('测试服务归属不一致，请管理员核查');
  const current=spec.Mode?.Replicated?.Replicas;
  if(!Number.isInteger(current)||current<0||current>1)throw new Error('测试服务副本配置异常，请管理员核查');
  const replicas=action==='stop'?0:1;

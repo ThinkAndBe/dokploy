@@ -1,3 +1,4 @@
+import {parseReleaseCompose,stringifyReleaseCompose} from './release-compose-policy';
 import {assertWrite} from './apphub-rbac';
 import {prepareDatabase,verifyDatabase} from './managed-databases';
 import {randomUUID} from 'node:crypto';
@@ -20,7 +21,7 @@ async function checkNewPort(port:number){
  const containers=(await docker(['ps','--format','{{json .Ports}}'])).split('\n');if(containers.some(s=>s.includes(':'+port+'->')))throw new Error('端口已被现有容器使用');
 }
 async function convergence(appName:string,expected:Record<string,any>){
- const until=Date.now()+150000;let stable=0;
+ const until=Date.now()+300000;let stable=0;
  while(Date.now()<until){
   const ids=(await docker(['service','ls','--filter','label=com.docker.stack.namespace='+appName,'-q'])).trim().split(/\s+/).filter(Boolean);
   if(ids.length){const services=JSON.parse(await docker(['service','inspect',...ids]));let ok=true;
@@ -55,8 +56,23 @@ async function execute(p:Plan){
   await db.update(compose).set({composeFile:p.payload.compose,serviceNetworks:Object.keys((await import('yaml')).parse(p.payload.compose).services).map(serviceName=>({serviceName,networkIds:[],detachDokployNetwork:true}))}).where(eq(compose.composeId,p.service_id));
  }
  if(!current)throw new Error('无法创建服务');
+ if(p.payload.sandboxOrder){
+  const zero=parseReleaseCompose(p.payload.compose);for(const service of Object.values(zero.services) as any[])service.deploy={...service.deploy,replicas:0};
+  await db.update(compose).set({composeFile:stringifyReleaseCompose(zero)}).where(eq(compose.composeId,p.service_id));
+ }
  await deployCompose({composeId:p.service_id,titleLog:'发布方案 '+p.id,descriptionLog:'配置摘要 '+p.plan_hash,freshVolumes:false});
- const {parse}=await import('yaml');await convergence(current.appName,parse(p.payload.compose).services);
+ const wanted=parseReleaseCompose(p.payload.compose).services;
+ if(p.payload.sandboxOrder){
+  await db.update(compose).set({composeFile:p.payload.compose}).where(eq(compose.composeId,p.service_id));
+  for(const level of [...p.payload.sandboxOrder,['preview_access']] as string[][]){
+   const names=level.filter(n=>wanted[n]);if(!names.length)continue;
+   if(names.some(n=>!/^[a-z][a-z0-9_-]{0,39}$/.test(n)))throw new Error('测试组件名称无效');
+   await event(releaseSql,p.id,'system','starting_components',names.join('、'));
+   await docker(['service','scale','--detach=true',...names.map(n=>current!.appName+'_'+n+'=1')]);
+   await convergence(current.appName,Object.fromEntries(names.map(n=>[n,wanted[n]])));
+  }
+ }
+ await convergence(current.appName,wanted);
  if(c.kind==='database'){let ready=false;for(let attempt=0;attempt<20;attempt++){try{await verifyDatabase(p);ready=true;break;}catch{await delay(3000);}}if(!ready)throw new Error('数据库或连接池 SQL 核验未通过，请查看服务日志；数据卷已保留');}
 }
 export async function releaseTick(){

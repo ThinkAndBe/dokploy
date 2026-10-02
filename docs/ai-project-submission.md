@@ -1,6 +1,6 @@
 # AppHub AI 项目提交说明 APPHUB-SUBMIT-1
 
-你通过用户的个人 MCP 密钥操作 AppHub。先调用 get_submission_guide 获取当前说明，再用 tools/list 确认可用工具；权限以当前返回为准。密钥仅放在 AI 客户端私密配置，不进入源码、README、日志、截图或交付报告。不要索取独立 Git/仓库/数据库管理员凭据。
+你通过用户的个人 MCP 密钥操作 AppHub。先用 tools/list 确认可用工具，再调用 get_submission_guide 获取当前说明；权限以当前返回为准。密钥仅放在 AI 客户端私密配置，不进入源码、README、日志、截图或交付报告。不要索取独立 Git/仓库/数据库管理员凭据。
 密钥有明确有效期（1–365 天）。过期时停止写入并提示用户登录“AI 接入 → 我的密钥”续期；过期但未撤销的密钥可保留原 KEY 续用，客户端配置不变。AI 不能替自己续期，不能请求管理员凭据绕过；已撤销密钥必须重新接入。
 
 ## 1. 确认项目和交付目标
@@ -14,15 +14,31 @@ README.md 至少包含：项目名称与用途；技术栈/运行时版本；构
 为各项目保留本地 Git；按实际修改提交，记录本地 commit。README/版本说明可记录本地 commit 关联；平台保存的是源码快照，平台 SHA 与本地 SHA 可能不同，以平台返回的 SHA 测试。
 
 ## 3. 测试运行标准 APPHUB-TEST-1
-测试为 Linux/amd64 的单个 HTTP 服务，监听 0.0.0.0，不得只监听 localhost。apphub.json 的 port 与实际一致；health 是本服务无需业务登录的健康路径，应返回 200。端口是容器端口，用户不用申请主机端口或配置测试域名。容器根目录只读，/tmp 可写，持久化限声明的 /data、/app/data、/app/uploads。默认测试单副本、1 GB 内存。构建单任务，最多 4 CPU、8 GB、30 分钟。
+单服务测试为 Linux/amd64 的单个 HTTP 服务，监听 0.0.0.0，不得只监听 localhost。apphub.json 的 port 与实际一致；health 是本服务无需业务登录的健康路径，应返回 200。端口是容器端口，用户不用申请主机端口或配置测试域名。容器根目录只读，/tmp 可写，持久化限声明的 /data、/app/data、/app/uploads。默认测试单副本、1 GB 内存。构建单任务，最多 4 CPU、8 GB、30 分钟。
 支持：纯静态 index.html；Vite npm build（默认 dist）；Node 24（npm 安装，scripts.start 必须存在，可选 scripts.build，使用 PORT/HOST）；.NET 10 Web（entry 指向 .csproj，支持 Directory.Build.props 继承）；Linux Dockerfile（其他语言/框架优先使用明确 Dockerfile，支持 BuildKit RUN --mount）。不要依赖平台自动开启 npm 开发服务器。
-apphub.json 仅支持这些字段：type、dockerfile、entry、context、output、port、health、storage.target。type 为 dockerfile/dotnet/static/node；Vite 使用 static，entry=package.json，output=dist。context/entry/dockerfile/output 均在项目内，entry/dockerfile/output 相对于 context。不要加入 env、compose、replicas 等未知字段。
+单服务 apphub.json 支持这些字段：type、dockerfile、entry、context、output、port、health、storage.target。type 为 dockerfile/dotnet/static/node；Vite 使用 static，entry=package.json，output=dist。context/entry/dockerfile/output 均在项目内，entry/dockerfile/output 相对于 context。不要加入 env、compose、replicas 等未知字段。
 Dockerfile 示例：{"type":"dockerfile","dockerfile":"Dockerfile","port":3000,"health":"/health","storage":{"target":"/data"}}
 Node 示例：{"type":"node","entry":"package.json","port":3000,"health":"/health"}
 Vite 示例：{"type":"static","entry":"package.json","output":"dist","port":8080,"health":"/health"}
 根目录静态示例：{"type":"static","output":".","port":8080,"health":"/health"}
 .NET 示例：{"type":"dotnet","entry":"src/Web/Web.csproj","port":8080,"health":"/health"}
-有多端口、子目录、特殊运行时或复杂构建时必须写明配置。上传 Compose 不会自动启动数据库、Redis、后台服务；多服务项目须明确 Web 入口及管理员准备的独立测试依赖。保留业务功能，不得删除后端、改成假静态页面或关闭鉴权来通过检查。
+有多端口、子目录、特殊运行时或复杂构建时必须写明配置。上传 Compose 不会自动启动数据库、Redis、后台服务；多服务项目可按下文 APPHUB-STACK-1 声明整套组件，或使用管理员准备的独立测试依赖。保留业务功能，不得删除后端、改成假静态页面或关闭鉴权来通过检查。
+
+## 多服务测试 APPHUB-STACK-1
+有数据库、消息队列或多个后台服务的项目，使用根目录 apphub.json 的 type=stack。平台不会直接执行上传的原始 Compose，也不会只挑一个前端冒充完整应用。
+必须声明 services，包含名为 app 的 Web 入口，共 2–16 个组件。根级 port/health 指向 app 容器。每组件可指定 build（context、dockerfile、args）或公开 image，二者选一；build 路径都相对于源码根目录，dockerfile 相对于该组件 context。镜像会构建/复制到项目专用仓库并固定摘要。
+每组件必须声明 healthcheck.test（CMD/CMD-SHELL 数组），可配置 intervalSeconds=5–60、timeoutSeconds=1–30、startSeconds=0–180。dependsOn 是组件名数组，不能循环。首次部署按依赖组逐组启动；应用仍应对依赖短暂断线自行重连。
+每组件支持 environment（字符串字典）、command/entrypoint（字符串数组）、user（数字 UID:GID）、storage（name/target/readOnly 数组）、tmpfs（target/sizeMb 数组）、memoryMb、cpus。默认单副本、每组件 512 MB/0.5 CPU；整套最多 16 GB/8 CPU，每组件 64–4096 MB/0.1–2 CPU。构建仍为单任务、4 CPU/8 GB、整套最多30分钟。容器根目录只读、无特权、无宿主机挂载，平台分配独立网络和项目数据卷，仅 app 的 HTTP 入口经项目授权后开放。
+测试网络隔离，禁止直接连接正式数据库；外部探针、主机抓包、第三方 AI 和在线情报源不随测试配置自动开放。对这些依赖必须在交付中明确说明，不得谎称真实流量或外部服务已验证。
+storage.target 支持 /data 及其子目录、/app/data、/app/uploads、/var/lib 或 /var/log 的数据子目录、/usr/share/opensearch/data；不得挂载 /、/etc、Docker socket 或宿主机路径。相同 name 是项目内共享卷，不会跨项目共享。tmpfs 仅限 /tmp、/run 的子目录、/var/run、/var/log、/var/cache 的子目录，单个8–256 MB。
+secretKeys 声明测试密钥名称（小写字母开头，可含数字和短横线），平台首次部署随机生成，重启/重新构建保留。environment 中使用 {{secret:名称}}，例如 PG_DSN=postgres://user:{{secret:database}}@database:5432/test。密码不能写进源码；密钥只在运行时通过 Docker Secret 注入，不传给构建。引用密钥时镜像需有 /bin/sh 和 cat。可用 login:{"username":"admin","passwordSecret":"initial-admin"} 说明初始账号，平台在受保护的项目测试说明中展示；应用需从相应环境变量读取，不能只写说明却不实现。
+静态检查通过后必须实际 start_test，再用 test_status 和 test_build_detail 跟踪；启动失败使用 test_runtime_log(projectId,buildId) 查看各组件脱敏日志。ready 仅表示平台启动与健康检查通过，业务验收需单独执行。stop_test/resume_test 处理整套组件，数据卷保留，恢复不重新构建。
+正式上线申请仍引用这次 testedPlanId。多服务申请需要管理员使用固定的整套组件镜像和正式配置部署，不能只发布 app 镜像。当前组件增删需管理员先回收旧测试环境；修改已有组件代码可以保存新版本后更新测试。
+
+最小多服务配置示例（实际项目需提供 web/Dockerfile，API 自行读取 REDIS_URL）：
+```json
+{"type":"stack","port":8080,"health":"/health","services":{"redis":{"image":"redis:7-alpine","healthcheck":{"test":["CMD","redis-cli","ping"]},"storage":[{"name":"redis","target":"/data"}]},"app":{"build":{"context":"web","dockerfile":"Dockerfile"},"dependsOn":["redis"],"environment":{"REDIS_URL":"redis://redis:6379"},"healthcheck":{"test":["CMD","wget","-qO-","http://127.0.0.1:8080/health"]}}}}
+```
 
 ## 4. 打包、核对并保存版本
 ZIP 不包含 .git、node_modules、构建缓存、真实 .env、密码、私钥或令牌。根目录放配置和入口；若 ZIP 有一个统一外层目录，preview_code_upload 的 stripRoot=true，否则 false。不要双重套文件夹。网页上传 ZIP 最大 20 MB；MCP ZIP 原始字节最大 8 MB（转换为标准 Base64）；解压后最大 60 MB、2000 个文件、单文件 5 MB。超过 MCP 限制请交付 ZIP 让用户在项目网页上传，不能用截断文件规避。

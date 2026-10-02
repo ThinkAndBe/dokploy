@@ -1,3 +1,4 @@
+import {validateStackArtifacts,prepareStackSecrets} from './stack-runtime';
 import {recycleSchema} from './version-recycle';
 import {inspectProjectTest} from './test-source';
 import http from 'node:http';
@@ -87,8 +88,10 @@ export async function workerAction(body:any){
  return {cancel:!!j.cancel_requested};}
  if(body.action==='finish'){
  if(j.cancel_requested){await sql`update apphub_build_job set status='cancelled',updated_at=now() where id=${j.id} and status='building'`;return {ok:true};}
+ const artifacts=j.manifest.type==='stack'?validateStackArtifacts(j.repository,j.manifest,body.artifacts):null;
+ if(artifacts&&artifacts.app!.image!==body.image)throw new Error('主入口镜像与组件结果不一致');
  if(!validBuiltImage(String(body.image),j.repository))throw new Error('镜像摘要不属于本次构建仓库');
- await sql`update apphub_build_job set image=${body.image},status='built',log=${redactBuildLog(String(body.log||''))},updated_at=now() where id=${j.id} and lease=${body.lease} and status='building'`;return {ok:true};}
+ await sql`update apphub_build_job set image=${body.image},artifacts=${artifacts?sql.json(artifacts):null},status='built',log=${redactBuildLog(String(body.log||''))},updated_at=now() where id=${j.id} and lease=${body.lease} and status='building'`;return {ok:true};}
  if(body.action==='fail'){await sql`update apphub_build_job set status=case when cancel_requested then 'cancelled' else 'failed' end,error=${redactBuildLog(String(body.error||'构建失败')).slice(-800)},log=${redactBuildLog(String(body.log||''))},updated_at=now() where id=${j.id} and lease=${body.lease} and status='building'`;return {ok:true};}
  throw new Error('未知构建操作');
 }
@@ -111,8 +114,8 @@ export async function buildTick(){
  const [p]=await sql`select * from apphub_build_project where project_id=${j.project_id}`;if(!p)throw new Error('项目测试配置不存在');
  if(j.status==='built'){
  if(j.cancel_requested){await sql`update apphub_build_job set status='cancelled' where id=${j.id}`;continue;}
- await runtime(j,p);
- const configuration=p.service_id?{kind:'update',serviceId:p.service_id,component:'app',image:j.image,replicas:1}:{kind:'web',name:'项目测试',image:j.image,containerPort:j.manifest.port,publishedPort:p.port,replicas:1,memoryMb:1024,loginMethod:j.manifest.entry?.endsWith('/Epos.Management.csproj')?'平台生成独立测试账号':'由应用管理登录',initialAccount:j.manifest.entry?.endsWith('/Epos.Management.csproj')?'admin':'',credentialHint:'测试账号可在项目测试详情中查看；与正式环境独立',buildJobId:j.id};
+ await runtime(j,p);await prepareStackSecrets(j,p);
+ const configuration=p.service_id?{kind:'update',serviceId:p.service_id,component:'app',image:j.image,replicas:1,...(j.manifest.type==='stack'?{buildJobId:j.id}:{})}:{kind:'web',name:'项目测试',image:j.image,containerPort:j.manifest.port,publishedPort:p.port,replicas:1,memoryMb:1024,loginMethod:j.manifest.login?'平台生成独立测试账号':j.manifest.entry?.endsWith('/Epos.Management.csproj')?'平台生成独立测试账号':'由应用管理登录',initialAccount:j.manifest.login?.username??(j.manifest.entry?.endsWith('/Epos.Management.csproj')?'admin':''),credentialHint:'测试账号可在项目测试详情中查看；与正式环境独立',buildJobId:j.id};
  const plan=await submitPlan(a,{environmentId:p.environment_id,title:'代码测试 '+j.commit_sha.slice(0,12),description:'固定代码版本 '+j.commit_sha,idempotencyKey:j.id,configuration});
  await sql`update apphub_build_job set plan_id=${plan.id} where id=${j.id}`;
  if(plan.status==='awaiting_confirmation')await decidePlan(a,plan.id,plan.hash,'confirm','用户从项目点击开始测试，自动构建后部署');
@@ -140,6 +143,12 @@ export async function buildRuntimeLog(a:Actor,id:string){
  const [p]=await sql`select service_id from apphub_release_plan where id=${j.planId}`;
  const service=p&&await db.query.compose.findFirst({where:eq(compose.composeId,p.service_id)});
  if(!service)return {log:'测试服务尚未创建'};
- try{const r=await promisify(execFile)('docker',['service','logs','--tail','200','--timestamps',service.appName+'_app'],{timeout:15000,maxBuffer:1024*1024});return {log:redactBuildLog(r.stdout+'\n'+r.stderr)};}
- catch{return {log:'暂时无法读取运行日志，请稍后重试'};}
+ try{
+  const document=(await import('./release-compose-policy')).parseReleaseCompose(service.composeFile),names=Object.keys(document.services);
+  const logs=await Promise.all(names.map(async name=>{if(!/^[a-z][a-z0-9_-]{0,39}$/.test(name))throw new Error('组件名称无效');try{const r=await promisify(execFile)('docker',['service','logs','--tail','80','--timestamps',service.appName+'_'+name],{timeout:15000,maxBuffer:512*1024});return '['+name+']\n'+r.stdout+'\n'+r.stderr;}catch{return '['+name+'] 暂时无法读取组件日志';}}));
+  let text=logs.join('\n');const [bp]=await sql`select stack_secrets from apphub_build_project where project_id=${j.projectId}`;
+  if(bp?.stack_secrets)for(const secret of Object.values(JSON.parse(decryptValue(bp.stack_secrets))) as string[])text=text.split(secret).join('[已隐藏]');
+  return {log:redactBuildLog(text)};
+ }catch{return {log:'暂时无法读取运行日志，请稍后重试'};}
+
 }

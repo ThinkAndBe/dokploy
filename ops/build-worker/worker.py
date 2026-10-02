@@ -76,7 +76,7 @@ def dockerfile(src,m):
  p=src/'.apphub-generated.Dockerfile';p.write_text(text);return p
 
 class Job:
- def __init__(self,j):self.j=j;self.lines='';self.seq=0;self.cancel=threading.Event();self.done=threading.Event();self.lock=threading.Lock()
+ def __init__(self,j):self.j=j;self.lines='';self.seq=0;self.cancel=threading.Event();self.done=threading.Event();self.lock=threading.Lock();self.deadline=time.monotonic()+1800
  def add(self,s):
   s=s.replace(TOKEN,'[worker credential hidden]')
   with self.lock:self.lines=(self.lines+s)[-170000:]
@@ -92,7 +92,7 @@ class Job:
   p=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env,start_new_session=True)
   def read():
    for chunk in iter(lambda:p.stdout.read1(4096),b''):self.add(chunk.decode(errors='replace'))
-  t=threading.Thread(target=read,daemon=True);t.start();deadline=time.monotonic()+timeout
+  t=threading.Thread(target=read,daemon=True);t.start();deadline=min(time.monotonic()+timeout,self.deadline)
   while p.poll() is None:
    if self.cancel.is_set() or STOP.is_set() or time.monotonic()>deadline:
     os.killpg(p.pid,signal.SIGTERM)
@@ -107,14 +107,14 @@ class Job:
   if not re.fullmatch(r'[a-f0-9-]{36}',j['id']):raise ValueError('任务 ID 无效')
   folder=ROOT/'jobs'/j['id'];src=folder/'source';src.mkdir(parents=True,exist_ok=False)
   threading.Thread(target=self.progress,daemon=True).start()
-  tag=j['repository']+':build-'+j['id'];success=False;builder='apphub-job-'+j['id']
+  tag=j['repository']+':build-'+j['id'];tags=[];success=False;builder='apphub-job-'+j['id']
   try:
    if shutil.disk_usage(ROOT).free<5*1024**3:raise RuntimeError('构建存储剩余空间不足5GB，请管理员清理或扩容')
    self.add('读取固定代码版本 '+j['commit']+'\n')
    req=urllib.request.Request(BASE+'/api/build-worker?'+urllib.parse.urlencode({'id':j['id'],'lease':j['lease']}),headers={'Authorization':'Bearer '+TOKEN})
    with urllib.request.urlopen(req,timeout=60) as r:data=r.read(100*1024*1024+1)
    if len(data)>100*1024*1024:raise RuntimeError('代码包过大')
-   unpack(data,src);df=dockerfile(src,j['manifest']);self.add('开始构建；最多4核、8GB内存。\n')
+   unpack(data,src);self.add('开始构建；最多4核、8GB内存，整套构建最多30分钟。\n')
    config=folder/'buildkitd.toml';ca=os.environ.get('APPHUB_REGISTRY_CA_FILE')
    if not ca or not pathlib.Path(ca).is_file():raise RuntimeError('构建镜像仓库证书未配置，未使用不安全连接')
    registry=j['repository'].split('/')[0]
@@ -122,16 +122,40 @@ class Job:
    image=os.environ.get('APPHUB_BUILDKIT_IMAGE')
    if not image:raise RuntimeError('BuildKit 基础镜像未配置')
    self.run(['docker','buildx','create','--name',builder,'--driver','docker-container','--buildkitd-config',str(config),'--driver-opt','image='+image,'--driver-opt','memory=8g','--driver-opt','memory-swap=8g','--driver-opt','cpu-period=100000','--driver-opt','cpu-quota=400000'],timeout=120)
-   context=src/safe_path(j['manifest']['context']) if j['manifest'].get('context') else src
-   self.run(['docker','buildx','build','--builder',builder,'--platform','linux/amd64','--load','--progress','plain','--label','apphub.managed-build=true','--label','apphub.build-job='+j['id'],'-f',str(df),'-t',tag,str(context)])
-   if self.cancel.is_set():raise RuntimeError('已取消')
-   self.add('\n构建完成，正在保存镜像。\n');self.run(['docker','push',tag],timeout=600)
-   raw=subprocess.check_output(['docker','image','inspect',tag],timeout=30);image=json.loads(raw)[0]
-   refs=[r for r in image.get('RepoDigests',[]) if r.startswith(j['repository']+'@sha256:')]
-   if len(refs)!=1:raise RuntimeError('无法确认构建镜像摘要')
-   self.add('\n镜像已保存，平台将自动启动测试服务。\n')
-   call('finish',id=j['id'],lease=j['lease'],image=refs[0],log=self.lines);success=True
-   (folder/'result.json').write_text(json.dumps({'commit':j['commit'],'image':refs[0]}))
+   def component(name,m,repository,build_args=None):
+    component_tag=repository+':build-'+j['id'];tags.append(component_tag)
+    df=dockerfile(src,m);context=src/safe_path(m['context']) if m.get('context') else src
+    args=['docker','buildx','build','--builder',builder,'--platform','linux/amd64','--load','--progress','plain','--label','apphub.managed-build=true','--label','apphub.build-job='+j['id']]
+    for key,value in (build_args or {}).items():args+=['--build-arg',key+'='+value]
+    self.add('\n构建组件 '+name+'\n');self.run(args+['-f',str(df),'-t',component_tag,str(context)])
+    if self.cancel.is_set():raise RuntimeError('已取消')
+    self.run(['docker','push',component_tag],timeout=600)
+    image=json.loads(subprocess.check_output(['docker','image','inspect',component_tag],timeout=30))[0]
+    refs=[r for r in image.get('RepoDigests',[]) if r.startswith(repository+'@sha256:')]
+    if len(refs)!=1:raise RuntimeError('无法确认组件镜像摘要：'+name)
+    config=image.get('Config') or {}
+    return {'image':refs[0],'entrypoint':config.get('Entrypoint') or [],'command':config.get('Cmd') or []}
+   artifacts=None
+   if j['manifest']['type']=='stack':
+    artifacts={}
+    for name,spec in j['manifest']['services'].items():
+     if not re.fullmatch(r'[a-z][a-z0-9-]{0,39}',name):raise ValueError('组件名称无效')
+     if spec.get('build'):
+      m={**spec['build'],'type':'dockerfile'};build_args=spec['build'].get('args',{})
+     else:
+      # Public base images are copied into the project-owned registry and pinned by digest.
+      external=spec['image']
+      if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/:@-]{0,299}',external):raise ValueError('组件镜像无效')
+      base=src/'.apphub-components'/name;base.mkdir(parents=True,exist_ok=True)
+      (base/'Dockerfile').write_text('FROM '+external+'\n')
+      m={'type':'dockerfile','dockerfile':'Dockerfile','context':'.apphub-components/'+name};build_args={}
+     repository=j['repository'] if name=='app' else j['repository']+'/components/'+name
+     artifacts[name]=component(name,m,repository,build_args)
+    image_ref=artifacts['app']['image']
+   else:image_ref=component('app',j['manifest'],j['repository'])['image']
+   self.add('\n镜像已保存，平台将按组件依赖启动测试服务。\n')
+   call('finish',id=j['id'],lease=j['lease'],image=image_ref,artifacts=artifacts,log=self.lines);success=True
+   (folder/'result.json').write_text(json.dumps({'commit':j['commit'],'image':image_ref,'artifacts':artifacts}))
   except Exception as e:
    self.add('\n'+str(e)+'\n')
    try:call('fail',id=j['id'],lease=j['lease'],error=str(e),log=self.lines)
@@ -143,7 +167,8 @@ class Job:
    try:subprocess.run(['docker','buildx','rm','--force',builder],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=60)
    except subprocess.TimeoutExpired:self.add('本次 BuildKit 清理超时，请管理员检查任务 '+j['id']+'\n')
    # Remove only this job's tag; never prune the shared node's images, volumes or build cache.
-   subprocess.run(['docker','image','rm',tag],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
+   for component_tag in tags:
+    subprocess.run(['docker','image','rm',component_tag],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
 
 def main():
  for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,lambda *_:STOP.set())

@@ -1,3 +1,5 @@
+import {generatedStackCompose,stackOrder} from './stack-policy';
+import {validateStackArtifacts} from './stack-runtime';
 import {secureTestCompose} from './preview-edge-policy';
 import {buildSchema} from './build-store';
 import {databaseCompose,databaseIdentity} from './database-policy';
@@ -37,13 +39,14 @@ async function testedSource(a:Actor,input:ReleaseInput,t:ReleaseTarget){
  const [p]=await releaseSql<Plan[]>`select * from apphub_release_plan where id=${input.testedPlanId} and organization_id=${a.organizationId}`;
  await buildSchema();const [build]=await releaseSql`select status from apphub_build_job where plan_id=${input.testedPlanId}`;
  if(build&&build.status!=='ready')throw new Error('应用健康检查尚未通过');
+ if(p?.payload?.sandboxOrder)throw new Error('此测试版本包含完整多服务编排，请管理员按上线申请中的固定组件镜像部署整套服务，不能只发布 Web 镜像');
  const compatibleKind=p&&(p.payload.input.configuration.kind===input.configuration.kind||(build?.status==='ready'&&p.payload.input.configuration.kind==='web'&&input.configuration.kind==='update'));
  if(!p||p.project_id!==t.projectId||p.environment_id!==t.testEnvironmentId||p.tier!=='test'||p.status!=='deployed'||p.payload.input.configuration.image!==input.configuration.image||!compatibleKind||(input.configuration.kind==='database'&&(p.payload.input.configuration.engine!==input.configuration.engine||p.payload.input.configuration.poolImage!==input.configuration.poolImage)))throw new Error('测试方案未通过或镜像摘要与正式方案不一致');
 }
 export async function submitPlan(a:Actor,raw:unknown){
  const input=releaseInput.parse(raw),{target:t,member:m,admin}=await authorizeTarget(a,input.environmentId);if(t.tier==='formal'&&!admin)throw new Error('生产发布由管理员处理，请从已完成的测试版本提交上线申请');validateConfiguration(input.configuration,t);await testedSource(a,input,t);
  if(!admin&&(input.configuration.kind==='database'||('databasePlanId' in input.configuration&&input.configuration.databasePlanId)))throw new Error('数据库配置仅限管理员');
- const id=randomUUID(),c=input.configuration;let baseHash='new',serviceId='rel-'+id;let document:any;let diff:any[]=[];let handoff:any;let serviceName=input.title;
+ const id=randomUUID(),c=input.configuration;let baseHash='new',serviceId='rel-'+id;let document:any;let diff:any[]=[];let handoff:any;let serviceName=input.title;let sandboxOrder:string[][]|undefined;
  if(c.kind==='update'){
   if(t.tier==='test'&&!admin&&!m.accessedServices.includes(c.serviceId))throw new Error('没有目标应用权限');
   const before=await db.query.compose.findFirst({where:eq(compose.composeId,c.serviceId),with:{domains:true,mounts:true}});
@@ -77,6 +80,16 @@ export async function submitPlan(a:Actor,raw:unknown){
   diff=[{field:'新增应用',before:'无',after:c.name},{field:'镜像',before:'无',after:c.image},{field:'端口',before:'无',after:`${c.publishedPort} → ${c.containerPort}`},{field:'副本/内存',before:'无',after:`${c.replicas} / ${c.memoryMb} MB`}];
   handoff={title:c.name,loginUrl:`http://${t.hostname}:${c.publishedPort}`,loginMethod:c.loginMethod,account:c.initialAccount,credentialHint:c.credentialHint,settings:[],notes:['本应用由审核后的固定镜像部署；业务登录账号仍由应用维护。']};
  }
+ if(c.kind!=='database'&&c.buildJobId){
+  const [job]=await releaseSql`select * from apphub_build_job where id=${c.buildJobId} and organization_id=${a.organizationId} and project_id=${t.projectId} and created_by=${a.id}`;
+  if(!t.managedBuild||t.tier!=='test'||!job||job.status!=='built'||job.cancel_requested||job.image!==c.image)throw new Error('自动构建记录与目标服务不匹配');
+  if(job.manifest.type==='stack'){
+   const artifacts=validateStackArtifacts(job.repository,job.manifest,job.artifacts);document=generatedStackCompose(job.manifest,artifacts,t.environmentId,t.sandboxNode!);sandboxOrder=stackOrder(job.manifest.services);
+   if(c.kind==='update'){const before=await db.query.compose.findFirst({where:eq(compose.composeId,c.serviceId)});const old=before&&parseReleaseCompose(before.composeFile);const oldNames=Object.keys(old?.services??{}).filter(n=>n!=='preview_access').sort();if(JSON.stringify(oldNames)!==JSON.stringify(Object.keys(document.services).sort()))throw new Error('多服务组件增删需要管理员先回收旧测试环境；数据卷保留');}
+   diff.push({field:'项目测试组件',before:c.kind==='update'?'已有组件':'无',after:Object.keys(document.services).join('、')});
+   handoff={...handoff,notes:[...(handoff.notes??[]),'多服务沙箱使用独立测试数据，停止测试会停止整套组件，数据卷保留。','外部探针、设备上报和可选第三方服务需单独配置；本沙箱仅开放授权 Web 入口。']};
+  }
+ }
  if(t.managedBuild&&t.tier==='test'&&c.kind!=='database'){
   const [bp]=await releaseSql`select port from apphub_build_project where project_id=${t.projectId} and organization_id=${a.organizationId}`;
   const [job]=await releaseSql`select manifest from apphub_build_job where project_id=${t.projectId} and organization_id=${a.organizationId} order by created_at desc limit 1`;
@@ -84,7 +97,7 @@ export async function submitPlan(a:Actor,raw:unknown){
   handoff={...handoff,loginUrl:null,notes:[...(handoff.notes||[]),'测试应用仅允许项目授权成员从 AppHub 打开，IP 直连需要同等授权。']};
  }
  handoff={...handoff,settings:[...(handoff.settings??[]).filter((r:any)=>r.label!=='本次镜像摘要'&&r.label!=='发布方案'),{label:'本次镜像摘要',value:c.image},{label:'发布方案',value:id}],updatedAt:new Date().toISOString()};
- const payload={input,requestHash:digest(input),compose:stringifyReleaseCompose(document),serviceName,diff,handoff,policyHash:digest(t),baseHash};
+ const payload={...(sandboxOrder?{sandboxOrder}:{}),input,requestHash:digest(input),compose:stringifyReleaseCompose(document),serviceName,diff,handoff,policyHash:digest(t),baseHash};
  return visiblePlan(await insertPlan({id,organization_id:a.organizationId,project_id:t.projectId,environment_id:t.environmentId,service_id:serviceId,created_by:a.id,title:input.title,tier:t.tier,status:t.tier==='test'?'awaiting_confirmation':'awaiting_approval',plan_hash:digest(payload),base_hash:baseHash,payload},input.idempotencyKey));
 }
 export async function accessiblePlan(a:Actor,id:string){const [p]=await releaseSql<Plan[]>`select * from apphub_release_plan where id=${id} and organization_id=${a.organizationId}`;if(!p)throw new Error('方案不存在或未授权');const access=await authorizeTarget(a,p.environment_id);if(!access.admin&&p.payload.input.configuration.kind==='database')throw new Error('数据库管理仅限管理员');if(!access.admin&&p.created_by!==a.id&&p.tier==='test'&&!access.member.accessedServices.includes(p.service_id))throw new Error('方案不存在或未授权');return {plan:p,...access};}

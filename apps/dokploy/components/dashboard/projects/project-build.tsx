@@ -35,6 +35,7 @@ export function ProjectBuild({projectId,commit}:{projectId:string;commit?:string
  {e&&e.desired>0&&e.state!=='absent'&&<Button variant="outline" disabled={busy||change.isPending} onClick={()=>change.mutate({projectId,action:'stop'})}>停止测试</Button>}
  </div></div>
  {compatibility.data&&<CompatibilityCard data={compatibility.data}/>}
+ {e?.components&&e.components.length>2&&<details className="rounded-lg border p-4" open={e.state!=='running'}><summary className="cursor-pointer">测试组件状态（{e.running}/{e.desired} 运行）</summary><p className="text-sm text-muted-foreground my-2">停止或恢复测试会同时处理本项目全部组件，数据卷保留。</p><div className="grid gap-2 sm:grid-cols-2">{e.components.filter(c=>c.name!=='preview_access').map(c=><div key={c.name} className="rounded border p-2 flex justify-between gap-2"><code>{c.name}</code><span>{c.state} · {c.running}/{c.desired}</span></div>)}</div></details>}
  {compatibility.isPending&&testCommit&&<p>正在检查版本测试配置…</p>}{compatibility.error&&<p role="alert" className="text-destructive">{compatibility.error.message}</p>}
  {different&&<p className="text-sm">已选择版本 <code translate="no">{selectedCommit.slice(0,12)}</code>。点击“更新测试版本”后自动准备；当前预览保持原运行版本。</p>}
  {(error||environment.error||jobs.error)&&<p role="alert" className="border rounded p-3 text-destructive">{error||environment.error?.message||jobs.error?.message}</p>}

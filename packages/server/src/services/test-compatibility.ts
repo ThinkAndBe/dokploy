@@ -7,6 +7,8 @@ export function inspectTestSource(files:Pick<CodeFile,'path'|'data'>[]){
  const issues:CompatibilityIssue[]=[];let inferred=false;let raw:any;
  const add=(level:CompatibilityIssue['level'],path:string,message:string)=>issues.push({level,path,message});
  const text=(p:string)=>source.get(p)||'';
+ const composeFiles=files.filter(f=>/(^|\/)(?:docker-compose\.ya?ml|compose\.ya?ml)$/.test(f.path)).map(f=>f.path);
+ const nestedEntries=files.filter(f=>f.path.includes('/')&&/(^|\/)(?:Dockerfile(?:\.[^/]+)?|package\.json)$/.test(f.path)).map(f=>f.path);
  function targetFramework(p:string){
   const explicit=text(p).match(/<TargetFramework\s*>\s*([^<]+?)\s*<\/TargetFramework>/);if(explicit)return explicit[1]!.trim();
   const parts=p.split('/');parts.pop();
@@ -30,7 +32,11 @@ export function inspectTestSource(files:Pick<CodeFile,'path'|'data'>[]){
   if(web.length===1&&targetFramework(web[0]!.path)==='net10.0'){raw={type:'dotnet',entry:web[0]!.path,port:8080};inferred=true;}
   else if(web.length)add('error','apphub.json','.NET 自动适配支持单个 net10.0 Web 入口；其他框架或多个入口请明确 Dockerfile 和端口');
   else if(source.has('index.html')&&!files.some(f=>/\.(csproj|py|go|java|php|rb)$/.test(f.path))){raw={type:'static',output:'.',port:8080,health:'/health'};inferred=true;}
-  else add('error','项目根目录','没有找到可运行入口。多组件项目需提供根目录 Dockerfile 和 apphub.json；只有源码不代表可启动的 Web 应用');
+  else {
+   add('error','apphub.json',composeFiles.length?'已保存源码，但缺少根目录 apphub.json。检测到 Compose 多服务部署；整套测试请在 apphub.json 中使用 type=stack 并声明组件、依赖、健康检查和测试密钥，平台不会直接执行原始 Compose。':'已保存源码，但没有找到可运行入口。请在项目根目录添加 apphub.json，明确构建目录、入口、端口和健康检查。');
+   if(nestedEntries.length)add('info','候选构建入口',nestedEntries.slice(0,8).join('、')+'。平台不会自动挑选其中一个组件；请通过根目录 apphub.json 的 context、dockerfile 或 entry 指定。');
+   if(source.has('deploy/apphub/project.json'))add('info','deploy/apphub/project.json','此文件是项目迁移信息，不能替代根目录 apphub.json 构建配置。');
+  }
  }
  let manifest:ReturnType<typeof buildManifest.parse>|null=null;
  if(raw){const result=buildManifest.safeParse(raw);if(!result.success){for(const i of result.error.issues)add('error','apphub.json',`${i.path.join('.')||'配置'}：${i.message}`);}else manifest=result.data;}
@@ -38,7 +44,10 @@ export function inspectTestSource(files:Pick<CodeFile,'path'|'data'>[]){
   const m=manifest,prefix=m.context?m.context+'/':'';
   const at=(p:string)=>prefix+p;
   if(m.context&&!files.some(f=>f.path.startsWith(prefix)))add('error','apphub.json','context 指定的目录不存在');
-  if(m.type==='dockerfile'){
+  if(m.type==='stack'){
+   for(const [n,s] of Object.entries(m.services!))if(s.build){const base=s.build.context?s.build.context+'/':'';const dockerfile=base+s.build.dockerfile;if(!source.has(dockerfile))add('error',dockerfile,n+' 组件的 Dockerfile 不存在');}
+   add('info','多服务沙箱','平台统一构建并按依赖启动 '+Object.keys(m.services!).length+' 个组件；项目独立网络和数据卷，只有 app 入口经项目授权后可访问。');
+  }else if(m.type==='dockerfile'){
    if(!source.has(at(m.dockerfile)))add('error',at(m.dockerfile),'找不到 Dockerfile；路径相对于 context（默认项目根目录）');
    else if(/RUN\s+--mount=|^#\s*syntax=/mi.test(text(at(m.dockerfile))))add('info',at(m.dockerfile),'使用 BuildKit 构建语法，平台将使用受资源限制的 BuildKit 执行器');
   }else if(m.type==='dotnet'){
@@ -50,8 +59,9 @@ export function inspectTestSource(files:Pick<CodeFile,'path'|'data'>[]){
   }else if(m.type==='node')add('error','apphub.json','Node 服务需要 entry=package.json');
   else if(!source.has(at(m.output==='.'?'index.html':m.output+'/index.html')))add('error','apphub.json','静态目录内没有 index.html；源码前端需指定 entry=package.json');
   if(m.entry==='package.json'&&!source.has(at('package-lock.json')))add('warning',at('package.json'),'未提供 package-lock.json，将使用 npm install；建议提交锁文件保证版本可复现');
-  if(source.has('docker-compose.yml')||source.has('compose.yaml')||source.has('compose.yml'))add('warning','Compose','自动测试只启动一个 Web 服务，不会自动启动 Compose 中的数据库或其他服务；外部依赖须由管理员接入并配置');
+
  }
+ if(composeFiles.length&&manifest?.type!=='stack')add('warning',composeFiles.slice(0,8).join('、'),'检测到多服务部署文件。当前配置不会启动其中的数据库、消息队列或后台服务；整套业务请使用 type=stack 声明所有组件。仅有前端页面启动不代表整套业务可用，禁止直接连接正式数据。');
  if(!manifest&&!issues.some(i=>i.level==='error'))add('error','apphub.json','未能生成可用的构建配置');
  const runnable=!!manifest&&!issues.some(i=>i.level==='error');
  return {standard:TEST_STANDARD,runnable,status:runnable?(inferred?'auto':'ready'):'needs_configuration',label:runnable?(inferred?'平台可自动适配':'构建配置检查通过'):'需补齐测试配置',manifest,issues,

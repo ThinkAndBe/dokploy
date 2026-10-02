@@ -1,8 +1,8 @@
 import {it,expect,vi} from 'vitest';
 const state=vi.hoisted(()=>({headers:{} as any,status:200}));
 vi.mock('node:http',()=>({default:{get:(options:any,callback:any)=>{state.headers=options.headers;queueMicrotask(()=>callback({statusCode:state.status,resume(){}}));return {setTimeout(){},on(){},destroy(){}};}}}));
-vi.mock('@dokploy/server/constants',()=>({docker:{getService:()=>({inspect:async()=>({ID:'service',Spec:{Name:'apphubrel-abcd_app',Labels:{'com.docker.stack.namespace':'apphubrel-abcd'},Mode:{Replicated:{Replicas:1}},TaskTemplate:{ContainerSpec:{Image:'image',Mounts:[]}}}})}),listTasks:async()=>[{Status:{State:'running'},DesiredState:'running',Spec:{ContainerSpec:{Image:'image'}}}]}}));
-vi.mock('@dokploy/server/db',()=>({db:{query:{compose:{findFirst:async()=>({appName:'apphubrel-abcd',environmentId:'build-1234567890abcdef',environment:{projectId:'p'}})}}}}));
+vi.mock('@dokploy/server/constants',()=>({docker:{getService:()=>({inspect:async()=>({ID:'service',Spec:{Name:'apphubrel-abcd_app',Labels:{'com.docker.stack.namespace':'apphubrel-abcd'},Mode:{Replicated:{Replicas:1}},TaskTemplate:{ContainerSpec:{Image:'image',Mounts:[]}}}})}),listServices:async()=>[{ID:'service',Spec:{Name:'apphubrel-abcd_app',Labels:{'com.docker.stack.namespace':'apphubrel-abcd'},Mode:{Replicated:{Replicas:1}},TaskTemplate:{ContainerSpec:{Image:'image'}}}}],listTasks:async()=>[{Status:{State:'running'},DesiredState:'running',Spec:{ContainerSpec:{Image:'image'}}}]}}));
+vi.mock('@dokploy/server/db',()=>({db:{query:{compose:{findFirst:async()=>({appName:'apphubrel-abcd',composeFile:'{"services":{"app":{"image":"image"}}}',environmentId:'build-1234567890abcdef',environment:{projectId:'p'}})}}}}));
 vi.mock('@dokploy/server/db/schema',()=>({compose:{composeId:'id'}}));
 vi.mock('@dokploy/server/services/project-code',()=>({codeProject:async()=>({})}));
 vi.mock('@dokploy/server/services/release-policy',()=>({requireInteractive:()=>{}}));
