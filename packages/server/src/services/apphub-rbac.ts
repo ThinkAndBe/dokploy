@@ -58,3 +58,22 @@ export async function changeKeyExpiry(a:Actor,raw:unknown){
   return {id:input.id,expiresAt:expires,tokenUnchanged:true};
  });
 }
+
+// A member may reuse only their own live key. This never changes scopes or expiry.
+export async function addKeyProject(a:Actor,input:{id:string;projectId:string}){
+ await memberRole(a);
+ return sql.begin(async q=>{
+  const [m]=await q`select m.*,r.role as apphub_role from member m left join apphub_user_role r on r.organization_id=m.organization_id and r.user_id=m.user_id where m.user_id=${a.id} and m.organization_id=${a.organizationId} for update of m`;
+  if(!m)throw new Error('用户没有平台访问权限');
+  const [k]=await q`select * from apphub_mcp_key where id=${input.id} and organization_id=${a.organizationId} and user_id=${a.id} and not revoked and expires_at>now() for update`;
+  if(!k)throw new Error('请选择本人有效的接入；过期接入请先续期');
+  const role=effectiveRole(m.role,m.apphub_role);
+  const [p]=await q`select "projectId" from project where "projectId"=${input.projectId} and "organizationId"=${a.organizationId}`;
+  if(!p||(role!=='admin'&&!m.accesedProjects.includes(input.projectId)))throw new Error('项目不存在或未授权');
+  if(role==='viewer'&&k.scopes.some((s:string)=>s!=='read'))throw new Error('只读成员只能复用只读接入');
+  const projects=[...new Set<string>([...k.projects,input.projectId])];if(projects.length>50)throw new Error('一个接入最多绑定50个项目');
+  await q`update apphub_mcp_key set projects=${q.json(projects)} where id=${k.id}`;
+  await q`insert into apphub_permission_event(organization_id,actor,action,target,status) values(${a.organizationId},${a.id},'bind_mcp_project',${k.id+':'+input.projectId},'ok')`;
+  return {ok:true,tokenUnchanged:true};
+ });
+}

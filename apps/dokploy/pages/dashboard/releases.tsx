@@ -1,3 +1,4 @@
+import {ProjectSharing} from '@/components/dashboard/projects/sharing';
 import {ProjectBuild} from '@/components/dashboard/projects/project-build';
 import {useState,useEffect} from 'react';
 import Link from 'next/link';
@@ -18,7 +19,7 @@ export default function Releases(){
  const router=useRouter();const {data:auth}=api.user.get.useQuery();const admin=auth?.role==='owner'||auth?.role==='admin';const [handling,setHandling]=useState(false);const operations=admin&&(router.query.mode==='operations'||handling);const publishOnly=router.query.intent==='publish';
  const catalog=api.release.catalog.useQuery(),list=api.release.list.useQuery(undefined,{refetchInterval:5000});
  const [env,setEnv]=useState(''),[service,setService]=useState(''),[component,setComponent]=useState('app'),[image,setImage]=useState(''),[title,setTitle]=useState(''),[description,setDescription]=useState(''),[name,setName]=useState(''),[port,setPort]=useState(''),[innerPort,setInnerPort]=useState('8080'),[replicas,setReplicas]=useState('1'),[publicEnv,setPublicEnv]=useState('{}'),[tested,setTested]=useState('');
- const [selected,setSelected]=useState(''),[note,setNote]=useState(''),[ack,setAck]=useState(false),[error,setError]=useState(''),[key,setKey]=useState('');
+ const [selected,setSelected]=useState(''),[note,setNote]=useState(''),[ack,setAck]=useState(false),[error,setError]=useState('');
  const projectId=typeof router.query.projectId==='string'?router.query.projectId:'';
  const projects=api.project.workspace.useQuery();const project=projects.data?.find(p=>p.projectId===projectId);
  useEffect(()=>{setSelected('');setError('');},[projectId]);
@@ -28,9 +29,6 @@ export default function Releases(){
  const detail=api.release.detail.useQuery({id:selected},{enabled:!!selected,refetchInterval:5000});
  const submit=api.release.submit.useMutation({onSuccess:async p=>{setSelected(p.id);setAck(false);if(p.tier==='test'){try{await decide.mutateAsync({id:p.id,hash:p.hash,action:'confirm',note:'用户在页面点击开始测试，确认当前配置'});}catch{/* Mutation error is shown by decide. */}}void list.refetch();},onError:e=>setError(e.message)});
  const decide=api.release.decide.useMutation({onSuccess:()=>{setAck(false);void detail.refetch();void list.refetch();},onError:e=>setError(e.message)});
- const keys=api.release.planningKeys.useQuery();
- const revokeKey=api.user.deleteApiKey.useMutation({onSuccess:()=>{setKey('');void keys.refetch();},onError:e=>setError(e.message)});
- const createKey=api.release.createPlanningKey.useMutation({onSuccess:r=>{setKey(r.key);void keys.refetch();},onError:e=>setError(e.message)});
  const [engine,setEngine]=useState<'postgres'|'mysql'>('postgres'),[dbName,setDbName]=useState('appdata'),[poolSize,setPoolSize]=useState('20'),[maxClients,setMaxClients]=useState('100'),[binding,setBinding]=useState('');
  const utils=api.useUtils();const request=api.release.requestPublish.useMutation({onSuccess:()=>{void utils.release.publishRequests.invalidate();},onError:e=>setError(e.message)});
  const p=detail.data;
@@ -41,7 +39,7 @@ export default function Releases(){
  if(!operations&&!project)return <main className="p-8 space-y-3"><p>请从项目进入测试或上线操作。</p><Link href="/dashboard/home">返回我的项目</Link></main>;
  return <main className="max-w-7xl mx-auto w-full p-4 md:p-8 space-y-6"><header>{!operations&&<Link href="/dashboard/home" className="text-primary text-sm">← 返回我的项目</Link>}<h1 className="text-3xl font-semibold">{operations?"管理员发布处理":publishOnly?"申请上线":"项目测试"}</h1><p className="text-muted-foreground mt-2">测试直接在沙箱执行，无需审批；验证通过后申请上线，由管理员处理。</p></header>
  {error&&<p role="alert" className="border border-destructive text-destructive p-3 rounded">{error}</p>}
- <details className="border rounded-lg p-4"><summary className="cursor-pointer font-semibold">连接 AI / MCP</summary><p className="text-sm my-3">为当前账号生成仅用于查询和提交方案的密钥，有效期 7 天。它不能执行部署、审批或读取应用密码。不要与别人共享。</p><Button variant="outline" disabled={createKey.isPending} onClick={()=>createKey.mutate({})}>生成我的方案提交密钥</Button>{key&&<div className="mt-3 space-y-2"><p>仅本次显示，请保存到可信 AI 工具的 DOKPLOY_API_KEY 配置。MCP 使用 0.3.0 及以上版本。</p><textarea className={field} value={key} readOnly aria-label="方案提交密钥"/><Button variant="outline" onClick={()=>{setKey('');createKey.reset();}}>隐藏密钥</Button></div>}{keys.data?.map(k=><div key={k.id} className="flex justify-between items-center mt-3 gap-3"><span className="text-sm">{k.name} · 到期：{k.expiresAt?new Date(k.expiresAt).toLocaleString('zh-CN'):'未设置'}</span><Button variant="outline" disabled={revokeKey.isPending} onClick={()=>revokeKey.mutate({apiKeyId:k.id})}>撤销此密钥</Button></div>)}</details>
+ {!operations&&project&&<ProjectSharing projectId={projectId}/>}
  {!operations&&<section className="rounded-xl border p-5 space-y-3"><h2 className="text-xl font-semibold">{publishOnly?'选择已测试的版本申请上线':'项目工作区'}</h2><p className="font-medium" translate="no">{project?.name}</p>{!publishOnly&&<ProjectBuild projectId={projectId} commit={typeof router.query.commit==='string'?router.query.commit:undefined}/>}{publishOnly&&<p className="text-sm text-muted-foreground">在下方选择测试已完成的记录，核对测试结果后点击“申请上线”。没有完成的测试记录时不能申请上线。</p>}{admin&&<a className="text-sm text-primary underline" href={`/dashboard/project-operations?projectId=${projectId}`}>管理员：查看本项目容器、数据库与备份</a>}</section>}
  <div className={operations?"grid xl:grid-cols-2 gap-6":"space-y-6"}>{operations&&<section className="border rounded-xl p-5 space-y-4"><h2 className="text-xl font-semibold">运维部署配置</h2><label className="block">运维发布目标<select className={field} value={env} onChange={e=>{setEnv(e.target.value);setService('');}}><option value="">请选择已开放的环境</option>{catalog.data?.map(t=><option key={t.environmentId} value={t.environmentId}>{t.projectName} / {t.environmentName} · {t.tier==='test'?'测试':'正式（需审批）'}</option>)}</select></label>
  <label className="block">应用<select className={field} value={service} onChange={e=>setService(e.target.value)}><option value="">请选择应用</option>{target?.services.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}{target?.databaseImages&&<option value="database">申请数据库与连接池</option>}{target?.allowNewWeb&&<option value="new">新建 Web 应用（已构建镜像）</option>}</select></label>

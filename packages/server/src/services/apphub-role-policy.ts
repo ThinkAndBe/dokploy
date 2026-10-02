@@ -3,7 +3,7 @@ export function effectiveRole(native:string,assigned?:string):AppHubRole{return 
 export function assertRoleAction(role:AppHubRole,path:string,type:string){
  const database=/^(postgres|mysql|mariadb|mongo|redis|libsql|backup|volumeBackups)\./.test(path)||['release.databases','release.databaseStats','release.databaseCredential'].includes(path);
  if(database&&role!=='admin')throw new Error('数据库管理仅限管理员');
- if(role==='viewer'&&type==='mutation'&&!['build.preview','rbac.createKey','rbac.revokeKey','rbac.changeKeyExpiry','user.update','user.updatePassword','user.updateLanguage'].includes(path))throw new Error('当前为只读成员，不能修改项目、测试或申请上线');
+ if(role==='viewer'&&type==='mutation'&&!['build.preview','rbac.createKey','rbac.revokeKey','rbac.changeKeyExpiry','rbac.addKeyProject','user.update','user.updatePassword','user.updateLanguage'].includes(path))throw new Error('当前为只读成员，不能修改项目、测试或申请上线');
 }
 export function canCreateProject(role:AppHubRole,enabled:boolean){return role==='admin'||(role==='developer'&&enabled);}
 export function assertKeySelection(role:AppHubRole,enabled:boolean,projects:string[],scopes:string[]){

@@ -1,6 +1,7 @@
+import {useRouter} from 'next/router';
 import {toast} from 'sonner';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
-import {useState,type ReactElement} from 'react';
+import {useEffect,useState,type ReactElement} from 'react';
 import type {GetServerSidePropsContext} from 'next';
 import {validateRequest} from '@dokploy/server/lib/auth';
 import {DashboardLayout} from '@/components/layouts/dashboard-layout';
@@ -11,12 +12,16 @@ const scopeLabels={'create-project':'允许 AI 创建我的新项目（自动绑
 function KeyLifetime({days,onChange}:{days:number;onChange:(v:number)=>void}){
  return <label className="block space-y-2"><span>有效天数（1–365 天）</span><input aria-label="密钥有效天数" type="number" min={1} max={365} className="block border rounded p-2 bg-background w-full" value={days} onChange={e=>onChange(Number(e.target.value))}/><div className="flex gap-2 flex-wrap">{[7,30,90,365].map(n=><Button type="button" size="sm" variant={days===n?'default':'outline'} key={n} onClick={()=>onChange(n)}>{n} 天</Button>)}</div><p className="text-sm text-muted-foreground">从保存时起计算。持续开发可选 365 天；到期前或到期后都可在此续期，原 KEY 保持不变。不会自动无限续期。</p></label>;
 }
-export default function Mcp(){const me=api.rbac.me.useQuery(),list=api.rbac.keys.useQuery();const [name,setName]=useState('我的 AI 开发工具'),[projects,setProjects]=useState<string[]>([]),[customScopes,setCustomScopes]=useState<string[]|null>(null),[purpose,setPurpose]=useState<'new'|'existing'>('new'),[access,setAccess]=useState<'develop'|'read'>('develop'),[copied,setCopied]=useState(false),[days,setDays]=useState(90),[error,setError]=useState('');
+export default function Mcp(){const router=useRouter();const requestedProject=typeof router.query.projectId==='string'?router.query.projectId:'';const me=api.rbac.me.useQuery(),list=api.rbac.keys.useQuery();const [name,setName]=useState('我的 AI 开发工具'),[projects,setProjects]=useState<string[]>([]),[customScopes,setCustomScopes]=useState<string[]|null>(null),[purpose,setPurpose]=useState<'new'|'existing'>('new'),[access,setAccess]=useState<'develop'|'read'>('develop'),[copied,setCopied]=useState(false),[days,setDays]=useState(90),[error,setError]=useState('');
  const create=api.rbac.createKey.useMutation({onSuccess:()=>void list.refetch(),onError:e=>setError(e.message)}),revoke=api.rbac.revokeKey.useMutation({onSuccess:async(_,input)=>{if(create.data?.id===input.id)create.reset();if(editing?.id===input.id)setEditing(null);await list.refetch();toast.success('密钥已撤销并从列表移除');},onError:e=>setError(e.message)});
  const [editing,setEditing]=useState<{id:string;name:string}|null>(null),[renewDays,setRenewDays]=useState(90),[expiryError,setExpiryError]=useState('');
  const renew=api.rbac.changeKeyExpiry.useMutation({onSuccess:async()=>{await list.refetch();setEditing(null);setExpiryError('');toast.success('有效期已更新，原 KEY 保持不变，无需修改 AI 客户端配置');},onError:e=>setExpiryError(e.message)});
+ const projectContext=me.data?.projects.find(p=>p.id===requestedProject);
+ const [boundKey,setBoundKey]=useState('');
+ const bind=api.rbac.addKeyProject.useMutation({onSuccess:async()=>{await list.refetch();setBoundKey('');toast.success('项目已授权，AI 继续使用原配置，无需重新生成密钥');},onError:e=>setError(e.message)});
+ useEffect(()=>{if(!requestedProject)return;setPurpose('existing');setProjects(me.data?.projects.some(p=>p.id===requestedProject)?[requestedProject]:[]);},[requestedProject,me.data?.projects]);
  const isViewer=me.data?.role==='viewer';
- const newProject=purpose==='new'&&!!me.data?.canCreate&&!isViewer;
+ const newProject=!requestedProject&&purpose==='new'&&!!me.data?.canCreate&&!isViewer;
  const operationScopes=customScopes??(access==='read'||isViewer?['read']:['read','write','test','publish-request']);
  const scopes=[...operationScopes.filter(s=>s!=='create-project'&&(!isViewer||s==='read')),...(newProject?['create-project']:[])];
  const selectedProjects=newProject?[]:projects;
@@ -25,12 +30,13 @@ export default function Mcp(){const me=api.rbac.me.useQuery(),list=api.rbac.keys
  const url=typeof location==='undefined'?'https://apphub.erke.com/api/mcp':location.origin+'/api/mcp';
  return <main className="p-4 md:p-8 max-w-5xl mx-auto space-y-6">
  <header className="space-y-2"><h1 className="text-3xl font-semibold">连接你的 AI 工具</h1><p className="text-muted-foreground">让 AI 帮你创建项目、更新代码和启动测试。接入一次，以后继续使用。</p></header>
+ {requestedProject&&<section className="border rounded-xl p-5 space-y-3"><h2 className="text-xl font-semibold">{projectContext?'参与项目：'+projectContext.name:'项目共创'}</h2>{me.isPending?<p>正在核对项目权限…</p>:!projectContext?<p role="alert">该项目不存在或你尚未获授权，请联系项目负责人。</p>:<><p>复用你自己的 AI 接入。只绑定当前项目，原有操作权限和有效期保持不变。</p><label className="block">选择已有接入<select value={boundKey} onChange={e=>setBoundKey(e.target.value)} className="block border rounded p-2 bg-background w-full"><option value="">请选择</option>{list.data?.filter(k=>!k.revoked&&new Date(k.expires_at)>new Date()&&(!isViewer||k.scopes.every((s:string)=>s==='read'))).map(k=><option key={k.id} value={k.id}>{k.name}{k.projects.includes(requestedProject)?'（已授权本项目）':''}</option>)}</select></label><Button disabled={!boundKey||bind.isPending||list.data?.find(k=>k.id===boundKey)?.projects.includes(requestedProject)} onClick={()=>{setError('');bind.mutate({id:boundKey,projectId:requestedProject});}}>{list.data?.find(k=>k.id===boundKey)?.projects.includes(requestedProject)?'已授权，继续使用原配置':bind.isPending?'正在保存…':'授权当前项目，复用原配置'}</Button><p className="text-sm text-muted-foreground">没有可用接入时，可以在下方创建。不要向项目负责人索取或共享密钥。</p></>}</section>}
  {!create.data?<section className="border rounded-xl p-5 md:p-6 space-y-5">
  <h2 className="text-xl font-semibold">1. 你准备让 AI 做什么？</h2>
- <div className="grid sm:grid-cols-2 gap-3">
+ {!requestedProject&&<div className="grid sm:grid-cols-2 gap-3">
  <Button className="h-auto whitespace-normal py-4" variant={newProject?'default':'outline'} disabled={!me.data?.canCreate||isViewer} onClick={()=>{setPurpose('new');setCustomScopes(null);}}>创建新项目并开发</Button>
  <Button className="h-auto whitespace-normal py-4" variant={!newProject?'default':'outline'} onClick={()=>{setPurpose('existing');setCustomScopes(null);}}>继续已有项目</Button>
- </div>
+ </div>}
  {!me.data?<p role="status">正在读取你的项目权限…</p>:newProject?<p className="text-sm text-muted-foreground">不用先在网页创建项目。AI 创建的项目归你所有，这个接入只绑定它创建的项目。</p>:<fieldset className="space-y-2"><legend className="font-medium mb-2">选择允许 AI 访问的项目</legend>{me.data.projects.length?me.data.projects.map(p=><label className="flex items-center gap-2 rounded border p-3" key={p.id}><input type="checkbox" checked={projects.includes(p.id)} onChange={e=>setProjects(e.target.checked?[...projects,p.id]:projects.filter(i=>i!==p.id))}/>{p.name}</label>):<p className="text-sm text-muted-foreground">当前没有可访问项目，请联系项目所有人授权。创建新项目需要管理员授予创建权限。</p>}</fieldset>}
  <fieldset className="space-y-2"><legend className="font-medium mb-2">使用方式</legend><label className="flex items-center gap-2"><input type="radio" name="ai-access" checked={access==='develop'&&!isViewer} disabled={isViewer} onChange={()=>{setAccess('develop');setCustomScopes(null);}}/>开发与测试（推荐）</label><label className="flex items-center gap-2"><input type="radio" name="ai-access" checked={access==='read'||isViewer} onChange={()=>{setAccess('read');setCustomScopes(null);}}/>只查看代码和版本</label></fieldset>
  <details className="border rounded-lg p-3"><summary className="cursor-pointer font-medium">更多设置：名称、有效期和操作权限</summary><div className="space-y-4 pt-4"><label className="block space-y-2"><span>接入名称</span><input className="block border rounded p-2 bg-background w-full" value={name} onChange={e=>setName(e.target.value)}/></label><KeyLifetime days={days} onChange={setDays}/><fieldset><legend className="font-medium mb-2">自定义操作权限</legend>{Object.entries(scopeLabels).filter(([key])=>key!=='create-project').map(([key,label])=><label className="flex items-center gap-2 py-1" key={key}><input type="checkbox" checked={scopes.includes(key)} disabled={isViewer&&key!=='read'} onChange={e=>setCustomScopes(e.target.checked?[...operationScopes,key]:operationScopes.filter(s=>s!==key))}/>{label}</label>)}</fieldset></div></details>
