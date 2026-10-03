@@ -1,3 +1,4 @@
+import {readIdentitySchedule,writeIdentitySchedule} from './identity-schedule';
 import {readFile,writeFile,rename,mkdir} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {readIdentitySSO,ssoFile,encryptValue} from './identity-sso-config';
@@ -32,13 +33,38 @@ async function runSync(c:Config,id:string){
    for(let i=0;i<groups.length;i+=500)await q`insert into apphub_identity_group(source,external_id,organization_id,name,path,parent_path,deleted) select ${c.source},id,${c.organizationId},name,path,parent_path,deleted from jsonb_to_recordset(${q.json(groups.slice(i,i+500))}::jsonb) as x(id text,name text,path text,parent_path text,deleted boolean)`;
    await q`update "user" u set "firstName"=i.display_name,updated_at=now() from apphub_identity_user i where i.source=${c.source} and i.user_id=u.id`;
    await q`delete from session where user_id in(select user_id from apphub_identity_user where source=${c.source} and (not source_enabled or not access_enabled or missing or expires_at<=now()))`;
+   await q`update apphub_identity_schedule set next_run_at=now()+interval_minutes*interval '1 minute' where source=${c.source} and updated_at<=(select created_at from apphub_identity_sync where id=${id})`;
    await q`update apphub_identity_sync set status='succeeded',user_count=${users.length},group_count=${groups.length},updated_at=now() where id=${id}`;
   });
- }catch(e){await sql`update apphub_identity_sync set status='failed',error=${e instanceof Error?e.message.slice(0,300):'目录同步失败'},updated_at=now() where id=${id}`;}
+ }catch(e){await sql.begin(async q=>{await q`select pg_advisory_xact_lock(hashtext(${c.source}),64001)`;const [job]=await q`select status from apphub_identity_sync where id=${id}`;if(job?.status!=='running')return;await q`update apphub_identity_schedule set next_run_at=now()+interval_minutes*interval '1 minute' where source=${c.source} and updated_at<=(select created_at from apphub_identity_sync where id=${id})`;await q`update apphub_identity_sync set status='failed',error=${e instanceof Error?e.message.slice(0,300):'目录同步失败'},updated_at=now() where id=${id}`;});}
 }
-async function startSync(c:Config,actor:string){await identitySchema();const id=randomUUID();const started=await sql.begin(async q=>{await q`select pg_advisory_xact_lock(hashtext(${c.source}),64001)`;await q`update apphub_identity_sync set status='interrupted',error='任务进程中断；保留上次完整同步',updated_at=now() where source=${c.source} and status='running' and updated_at<now()-interval '5 minutes'`;const [active]=await q`select id from apphub_identity_sync where source=${c.source} and status='running'`;if(active)return {id:active.id,existing:true};await q`insert into apphub_identity_sync(id,source,organization_id,actor,status) values(${id},${c.source},${c.organizationId},${actor},'running')`;return {id,existing:false};});if(!started.existing)void runSync(c,id).catch(()=>console.error('Identity sync status unavailable'));return started;}
+async function startSync(c:Config,actor:string,automatic=false){
+ await identitySchema();const id=randomUUID();
+ const started=await sql.begin(async q=>{
+  await q`select pg_advisory_xact_lock(hashtext(${c.source}),64001)`;
+  const schedule=await readIdentitySchedule(q,c);
+  await q`update apphub_identity_sync set status='interrupted',error='任务进程中断；保留上次完整同步',updated_at=now() where source=${c.source} and status='running' and updated_at<now()-interval '5 minutes'`;
+  const [active]=await q`select id from apphub_identity_sync where source=${c.source} and status='running'`;
+  if(active)return {id:active.id as string,existing:true};
+  if(automatic){const [due]=await q`select source from apphub_identity_schedule where source=${c.source} and enabled and next_run_at<=now()`;if(!due)return {id:null,existing:false};}
+  await q`insert into apphub_identity_sync(id,source,organization_id,actor,status) values(${id},${c.source},${c.organizationId},${actor},'running')`;
+  await q`update apphub_identity_schedule set next_run_at=now()+${schedule.intervalMinutes}*interval '1 minute' where source=${c.source}`;
+  return {id,existing:false};
+ });
+ if(started.id&&!started.existing)void runSync(c,started.id).catch(()=>console.error('Identity sync status unavailable'));
+ return started;
+}
+export async function saveIdentitySchedule(a:Actor,input:unknown){
+ const c=await admin(a);
+ return sql.begin(async q=>{
+  await q`select pg_advisory_xact_lock(hashtext(${c.source}),64001)`;
+  const schedule=await writeIdentitySchedule(q,c,input,a.id);
+  await q`insert into apphub_identity_event(organization_id,actor,target,action) values(${a.organizationId},${a.id},${c.source},${'sync_schedule:'+JSON.stringify({enabled:schedule.enabled,intervalMinutes:schedule.intervalMinutes})})`;
+  return schedule;
+ });
+}
 export async function syncDirectory(a:Actor){return startSync(await admin(a),a.id);}
-export async function identityStatus(a:Actor){const c=await admin(a),sso=readIdentitySSO();const [counts]=await sql`select count(*)::int as total,count(*) filter(where source_enabled and not missing)::int as active,count(*) filter(where access_enabled)::int as allowed,count(*) filter(where email='')::int as missing_email from apphub_identity_user where source=${c.source}`;const runs=await sql`select id,status,user_count,group_count,error,created_at,updated_at from apphub_identity_sync where source=${c.source} order by created_at desc limit 10`;return {server:c.server,directory:c.directory,counts,runs,ssoEnabled:sso?.enabled??process.env.ATRUST_SSO_ENABLED==='true',ssoConfigured:!!(sso?.appId&&sso?.appSecret||process.env.ATRUST_APPID&&process.env.ATRUST_APPSECRET_FILE),callback:(process.env.APPHUB_PUBLIC_URL||'').replace(/\/$/,'')+'/api/auth/atrust/callback',automaticSyncMinutes:process.env.ATRUST_AUTO_SYNC==='true'?30:null};}
+export async function identityStatus(a:Actor){const c=await admin(a),sso=readIdentitySSO();const [counts]=await sql`select count(*)::int as total,count(*) filter(where source_enabled and not missing)::int as active,count(*) filter(where access_enabled)::int as allowed,count(*) filter(where email='')::int as missing_email from apphub_identity_user where source=${c.source}`;const runs=await sql`select id,status,user_count,group_count,error,created_at,updated_at from apphub_identity_sync where source=${c.source} order by created_at desc limit 10`;return {server:c.server,directory:c.directory,counts,runs,ssoEnabled:sso?.enabled??process.env.ATRUST_SSO_ENABLED==='true',ssoConfigured:!!(sso?.appId&&sso?.appSecret||process.env.ATRUST_APPID&&process.env.ATRUST_APPSECRET_FILE),callback:(process.env.APPHUB_PUBLIC_URL||'').replace(/\/$/,'')+'/api/auth/atrust/callback',schedule:await readIdentitySchedule(sql,c),schedulerAvailable:process.env.APPHUB_IDENTITY_ENABLED==='true'};}
 export async function saveIdentitySSO(a:Actor,input:{appId:string;secret?:string;enabled:boolean}){const c=await admin(a),old=readIdentitySSO(),appId=input.appId||old?.appId||'',secret=input.secret||old?.appSecret||'';if(input.enabled&&(!appId||!secret))throw new Error('启用前必须填写正式 SSO 应用 AppID 和 AppSecret');const file=ssoFile(),temp=file+'.'+randomUUID()+'.tmp';await mkdir(dirname(file),{recursive:true});await writeFile(temp,JSON.stringify({appId,encryptedSecret:secret?encryptValue(secret):'',enabled:input.enabled,server:c.server,updatedAt:new Date().toISOString()}),{mode:0o600});await rename(temp,file);await sql`insert into apphub_identity_event(organization_id,actor,target,action) values(${a.organizationId},${a.id},'atrust','sso_config')`;return {ok:true};}
 export async function identityUsers(a:Actor,input:{search:string;page:number;group:string}){const c=await admin(a),term='%'+input.search.replace(/[\\%_]/g,'\\$&')+'%';const rows=await sql`select external_id,username,employee_number,display_name,email,group_path,department,source_enabled,access_enabled,missing,user_id,synced_at,expires_at,count(*) over()::int as total from apphub_identity_user where source=${c.source} and (username ilike ${term} or display_name ilike ${term} or email ilike ${term} or employee_number ilike ${term}) and (${input.group}='' or group_path=${input.group}) order by username,external_id limit 50 offset ${(input.page-1)*50}`;return {rows,total:rows[0]?.total??0};}
 export async function identityGroups(a:Actor,search:string){const c=await admin(a),term='%'+search.replace(/[\\%_]/g,'\\$&')+'%';return sql`select external_id,name,path,parent_path from apphub_identity_group where source=${c.source} and not deleted and (path ilike ${term} or name ilike ${term}) order by path limit 100`;}
@@ -51,4 +77,6 @@ export async function identityLogin(info:{name:string;displayName:string;email?:
 }
 export async function identityAudit(a:Actor){await admin(a);return sql`select e.action,e.target,e.created_at,coalesce(nullif(trim(concat_ws(' ',u."firstName",u."lastName")),''),u.email) as actor_name from apphub_identity_event e left join "user" u on u.id=e.actor where e.organization_id=${a.organizationId} order by e.id desc limit 100`;}
 let ticking=false;
-export function startIdentityWorker(){if(process.env.ATRUST_AUTO_SYNC!=='true')return;const tick=async()=>{if(ticking)return;ticking=true;try{await identitySchema();const c=await config();const [last]=await sql`select created_at from apphub_identity_sync where source=${c.source} order by created_at desc limit 1`;if(!last||Date.now()-new Date(last.created_at).getTime()>30*60000)await startSync(c,'system');}catch{console.error('Identity directory synchronization unavailable');}finally{ticking=false;}};const timer=setInterval(()=>void tick(),60000);timer.unref();void tick();}
+let identityTimer:ReturnType<typeof setInterval>|undefined;
+export async function tickIdentitySync(){if(ticking)return;ticking=true;try{await startSync(await config(),'system',true);}catch{console.error('Identity directory synchronization unavailable');}finally{ticking=false;}}
+export function startIdentityWorker(){if(identityTimer)return;identityTimer=setInterval(()=>void tickIdentitySync(),60000);identityTimer.unref();void tickIdentitySync();}

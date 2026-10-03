@@ -8,6 +8,7 @@ export function identitySchema(){return init??=(async()=>{
  await sql`create table if not exists apphub_identity_group(source text not null,external_id text not null,organization_id text not null,name text not null,path text not null,parent_path text not null,deleted boolean not null,primary key(source,external_id))`;
  await sql`create table if not exists apphub_identity_sync(id uuid primary key,source text not null,organization_id text not null,actor text not null,status text not null,user_count integer not null default 0,group_count integer not null default 0,error text,created_at timestamptz not null default now(),updated_at timestamptz not null default now())`;
  await sql`create table if not exists apphub_identity_event(id bigserial primary key,organization_id text not null,actor text not null,target text not null,action text not null,created_at timestamptz not null default now())`;
+ await sql`create table if not exists apphub_identity_schedule(source text primary key,organization_id text not null,enabled boolean not null,interval_minutes integer not null check(interval_minutes between 5 and 10080),next_run_at timestamptz not null,updated_at timestamptz not null default now(),updated_by text not null)`;
  })().catch(e=>{init=undefined;throw e;});}
 export async function identitySessionAllowed(userId:string){
  if(process.env.APPHUB_IDENTITY_ENABLED!=='true')return true;
