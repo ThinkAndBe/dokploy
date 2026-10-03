@@ -1,7 +1,7 @@
 import {readProjectProfile,saveProjectProfile} from '@dokploy/server/services/project-profile';
 import {projectProfileInput} from '@dokploy/server/services/project-profile-policy';
 import {listRecycled,changeRecycled} from '@dokploy/server/services/version-recycle';
-import {versionInput,versionListOutput} from '@dokploy/server/services/version-api';
+import {versionInput,versionListOutput,changeVersionInput} from '@dokploy/server/services/version-api';
 import {browseCode,commitCode} from '@dokploy/server/services/project-code';
 import {readHandoff,canRevealCredential,revealCredential} from "@dokploy/server/services/apphub-handoff";
 import {
@@ -90,7 +90,7 @@ export const projectRouter = createTRPCRouter({
  }),
 
  recycledVersions:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200)})).query(({ctx,input})=>listRecycled(sharingActor(ctx),input.projectId)),
- changeVersion:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200),name:versionInput.shape.name,commit:versionInput.shape.commit,action:z.enum(['delete','restore'])})).mutation(async({ctx,input})=>{
+ changeVersion:protectedProcedure.input(changeVersionInput).mutation(async({ctx,input})=>{
   if(ctx.req.headers.origin!==process.env.APPHUB_PUBLIC_URL?.replace(/\/$/,''))throw new TRPCError({code:'FORBIDDEN',message:'请从项目页面管理版本'});
   try{return await changeRecycled(sharingActor(ctx),input);}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'版本操作未完成'});}
  }),

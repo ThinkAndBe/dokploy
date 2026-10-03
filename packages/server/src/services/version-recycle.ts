@@ -1,3 +1,4 @@
+import {changeVersionInput} from './version-api';
 import {versionBlockReason} from './version-recycle-policy';
 import {buildSchema,sql} from './build-store';
 import {codeProject} from './project-code';
@@ -25,7 +26,7 @@ async function references(q:any,a:Actor,pid:string,sha:string,head:string){
 }
 export async function listRecycled(a:Actor,pid:string){await repository(a,pid);await recycleSchema();return (await sql`select name,sha,deleted_at from apphub_version_recycle where organization_id=${a.organizationId} and project_id=${pid} order by deleted_at desc limit 200`).map(r=>({name:String(r.name),sha:String(r.sha),deletedAt:String(r.deleted_at)}));}
 export async function changeRecycled(a:Actor,input:{projectId:string;name:string;commit:string;action:'delete'|'restore'}){
- requireInteractive(a.apiKey);await assertWrite(a);const base=await repository(a,input.projectId);await recycleSchema();
+ input=changeVersionInput.parse(input); requireInteractive(a.apiKey);await assertWrite(a);const base=await repository(a,input.projectId);await recycleSchema();
  const tag=await get(base,'/tags/'+encodeURIComponent(input.name));if(tag.commit?.sha!==input.commit)throw new Error('版本记录已经变化，请刷新核对后重试');
  const repo=await get(base,'');const branch=await get(base,'/branches/'+encodeURIComponent(String(repo.default_branch||'main')));const head=String(branch.commit?.id||branch.commit?.sha||'');if(!/^[a-f0-9]{40}$/.test(head))throw new Error('无法核验最新代码，未删除版本');
  return sql.begin(async q=>{await q`select pg_advisory_xact_lock(hashtext(${input.projectId}),63001)`;
