@@ -34,7 +34,7 @@ const definitions=[
  ['resume_test','恢复现有测试应用，不重新构建','test',{projectId:{type:'string'}}],
  ['request_publish','为验证好的测试方案提交正式上线申请；不会审批或正式部署','publish-request',{projectId:{type:'string'},testedPlanId:{type:'string'},description:{type:'string'}}],
 ] as const;
-export function mcpTools(scopes:string[],viewer=false){return definitions.filter(d=>scopes.includes(d[2])&&(!viewer||d[2]==='read')).map(([name,description,,properties])=>({name,description,inputSchema:{type:'object',properties,additionalProperties:false,required:Object.keys(properties).filter(k=>!['page','path','description','stripRoot'].includes(k))},annotations:{readOnlyHint:['get_submission_guide','check_test_compatibility','test_build_detail','test_runtime_log','list_projects','list_versions','read_code','test_status'].includes(name),destructiveHint:name==='save_code_version'||name==='stop_test',openWorldHint:false}}));}
+export function mcpTools(scopes:string[],viewer=false){return definitions.filter(d=>scopes.includes(d[2])&&(!viewer||d[2]==='read')).map(([name,description,,properties])=>({name,description,inputSchema:{type:'object',properties,additionalProperties:false,required:Object.keys(properties).filter(k=>!['page','path','stripRoot'].includes(k)&&(k!=='description'||name==='save_code_version'||name==='create_version'))},annotations:{readOnlyHint:['get_submission_guide','check_test_compatibility','test_build_detail','test_runtime_log','list_projects','list_versions','read_code','test_status'].includes(name),destructiveHint:name==='save_code_version'||name==='stop_test',openWorldHint:false}}));}
 export async function callProjectTool(auth:Awaited<ReturnType<typeof authenticateMcp>>,name:string,raw:unknown){
  const d=definitions.find(d=>d[0]===name);if(!d||!auth.key.scopes.includes(d[2]))throw new Error('MCP 工具未授权');
  const input=z.record(z.string(),z.unknown()).parse(raw??{});const extra=Object.keys(input).filter(k=>!Object.keys(d[3]).includes(k));if(extra.length)throw new Error('工具参数无效');
@@ -45,7 +45,7 @@ export async function callProjectTool(auth:Awaited<ReturnType<typeof authenticat
  // Only this authenticated, project-scoped adapter delegates to interactive services.
  // The external MCP token is never accepted as a general platform API key.
  const names=await userNames(auth.actor.organizationId,[auth.actor.id]);
- const a={...auth.actor,name:actorName(auth.actor.id,names),email:'mcp@apphub.invalid'};
+ const a={...auth.actor,name:actorName(auth.actor.id,names),email:'mcp@apphub.invalid',source:'mcp' as const};
  await audit(a,'mcp:'+name+':requested',projectId);
  try{let result:unknown;
  switch(name){
@@ -56,7 +56,7 @@ export async function callProjectTool(auth:Awaited<ReturnType<typeof authenticat
  case 'read_code':result=await browseCode(a,{projectId,commit:sha.parse(input.commit),path:z.string().max(1000).default('').parse(input.path)});break;
  case 'preview_code_upload':{const base=z.string().max(11200000).parse(input.zipBase64),buffer=Buffer.from(base,'base64');if(buffer.toString('base64')!==base)throw new Error('ZIP Base64 编码无效');if(buffer.length>8*1024*1024)throw new Error('ZIP 超过 8 MB，请使用项目网页上传');result=await previewCode(a,projectId,buffer,z.boolean().default(false).parse(input.stripRoot));break;}
  case 'save_code_version':{const v=versionInput.parse({projectId,name:input.name,description:input.description,commit:'0'.repeat(40)});result=await commitCode(a,{projectId,previewId:z.string().uuid().parse(input.previewId),name:v.name,description:v.description});break;}
- case 'create_version':{const v=versionInput.parse(input),p=await codeProject(a,projectId);result=await createRepositoryVersion(projectId,p.giteaRepoUrl!,v.name,v.commit,v.description);break;}
+ case 'create_version':{const v=versionInput.parse(input),p=await codeProject(a,projectId);result=await createRepositoryVersion(projectId,p.giteaRepoUrl!,v.name,v.commit,v.description,a.organizationId);break;}
  case 'test_status':{const env=await testEnvironment(a,projectId),jobs=await listBuilds(a,projectId);result={state:env.state,running:env.running,desired:env.desired,components:env.components,commit:env.commit,openInPlatform:(process.env.APPHUB_PUBLIC_URL||'')+'/dashboard/home',builds:jobs.map(j=>({id:j.id,commit:j.commit_sha,status:j.status,testedPlanId:j.plan_id,createdAt:j.created_at}))};break;}
  case 'start_test':result=await startBuild(a,{projectId,commit:sha.parse(input.commit),requestKey:z.string().uuid().parse(input.requestKey)});break;
  case 'stop_test':case 'resume_test':result=await changeTestEnvironment(a,projectId,name==='stop_test'?'stop':'resume');break;

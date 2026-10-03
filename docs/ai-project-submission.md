@@ -43,7 +43,7 @@ secretKeys 声明测试密钥名称（小写字母开头，可含数字和短横
 ## 4. 打包、核对并保存版本
 ZIP 不包含 .git、node_modules、构建缓存、真实 .env、密码、私钥或令牌。根目录放配置和入口；若 ZIP 有一个统一外层目录，preview_code_upload 的 stripRoot=true，否则 false。不要双重套文件夹。网页上传 ZIP 最大 20 MB；MCP ZIP 原始字节最大 8 MB（转换为标准 Base64）；解压后最大 60 MB、2000 个文件、单文件 5 MB。超过 MCP 限制请交付 ZIP 让用户在项目网页上传，不能用截断文件规避。
 调用 preview_code_upload(projectId, zipBase64, stripRoot)。检查返回 changes（特别是“移除”文件）、ignored、removedWrapper、compatibility。移除必须符合此次业务修改意图；意外移除应修正完整包重新预览。预览不会保存版本，约 1 小时后过期；其他人更新了项目需重新预览。
-配置需补齐时先修正；如业务要求先归档，也可保存但不得声称已经可测试。调用 save_code_version(projectId, previewId, name, description)，使用不可覆盖的新版本名，如 v1.2.0 或 v20261001.1。名称 1-80 位，以英文字母或数字开头，仅英文字母/数字/点/下划线/短横线，不能含 ..、末尾点或 .lock 后缀。描述最多 2000 字符，说明变更、验证、依赖和限制。记录返回的 projectId、name、sha。
+配置需补齐时先修正；如业务要求先归档，也可保存但不得声称已经可测试。调用 save_code_version(projectId, previewId, name, description)，遵守 APPHUB-VERSION-1：先 list_versions 读取 next，修复选择 next.patch，兼容新增功能选择 next.minor，不兼容变更选择 next.major。首次为 v1.0.0。版本必须为 v主版本.次版本.修订号（三段非负整数、无前导零，主版本最多3位，其余最多6位），不允许日期或后缀。不得仅修改日期冒充应用版本更新。版本不可覆盖、倒退、跳号或复用回收站中的名称；并发更新后重新读取 next。变更说明必填5–2000字符，写明改动、验证、依赖和限制。代码没有变化时直接使用原版本测试，不制造空版本。业务包内的版本声明应与本次应用版本一致；上游依赖版本单独记录。平台记录真实提交人和网页/AI渠道，AI 操作归属于实际密钥用户；历史缺失字段不编造。记录返回的 projectId、name、sha。
 create_version 只给已有提交建立版本名，不上传代码。上传保存返回超时先 list_versions 核查；不要盲目创建另一个版本或项目。
 
 ## 5. 使用固定版本测试与排错

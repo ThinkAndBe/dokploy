@@ -1,0 +1,11 @@
+import {it,expect,vi,afterEach} from 'vitest';
+const mock=vi.hoisted(()=>({removed:new Set<string>()}));
+vi.mock('../../../../packages/server/src/services/version-recycle',()=>({recycledNames:async()=>mock.removed}));
+vi.mock('../../../../packages/server/src/services/gitea-integration',()=>({giteaToken:()=> 'fixture'}));
+import {allVersionNames,enforceVersion,nextVersion} from '../../../../packages/server/src/services/version-governance';
+afterEach(()=>{vi.unstubAllGlobals();mock.removed.clear();});
+it('checks all tag pages rather than the visible page',async()=>{const f=vi.fn().mockResolvedValueOnce(Response.json(Array.from({length:100},(_,i)=>({name:'v1.0.'+i})))).mockResolvedValueOnce(Response.json([{name:'v3.0.0'}]));vi.stubGlobal('fetch',f);expect((await allVersionNames('http://fixture')).length).toBe(101);expect(f.mock.calls[1]![0]).toContain('page=2');});
+it('reserves recycled names and includes their version in the baseline',async()=>{mock.removed.add('v2.0.0');vi.stubGlobal('fetch',vi.fn(()=>Promise.resolve(Response.json([{name:'v1.0.0'}]))));await expect(enforceVersion('http://fixture','v2.0.0','org','p')).rejects.toThrow('回收站');expect((await nextVersion('http://fixture','org','p')).patch).toBe('v2.0.1');});
+it('rejects a stale recommendation after a collaborator has saved',async()=>{vi.stubGlobal('fetch',vi.fn(()=>Promise.resolve(Response.json([{name:'v1.0.1'}]))));await expect(enforceVersion('http://fixture','v1.0.1')).rejects.toThrow('已使用');await expect(enforceVersion('http://fixture','v1.0.2')).resolves.toBeUndefined();});
+it('does not assume a broken history query means an empty project',async()=>{vi.stubGlobal('fetch',vi.fn(()=>Promise.resolve(new Response('',{status:503}))));await expect(enforceVersion('http://fixture','v1.0.0')).rejects.toThrow('完整版本历史');});
+it('rejects malformed history responses',async()=>{vi.stubGlobal('fetch',vi.fn(()=>Promise.resolve(Response.json({unexpected:true}))));await expect(allVersionNames('http://fixture')).rejects.toThrow('响应无效');});

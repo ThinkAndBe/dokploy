@@ -21,7 +21,10 @@ export async function sharingDetails(a:Actor,projectId:string){
  const {m,owner}=await context(sql,a,projectId);const canManage=(await memberRole(a)).effectiveRole!=='viewer'&&(isProjectAdmin(m.role)||owner===a.id);
  const rows=await sql`select m.user_id as id,coalesce(nullif(trim(concat_ws(' ',u."firstName",u."lastName")),''),u.email) as name,u.email from member m join "user" u on u.id=m.user_id where m.organization_id=${a.organizationId} and ${projectId}=any(m."accesedProjects") order by u.email`;
  const candidates=canManage?await sql`select m.user_id as id,coalesce(nullif(trim(concat_ws(' ',u."firstName",u."lastName")),''),u.email) as name,u.email from member m join "user" u on u.id=m.user_id where m.organization_id=${a.organizationId} order by u.email`:[];
- return {ownerId:owner??null,isOwner:owner===a.id,canManage,members:rows.map(r=>({id:String(r.id),name:String(r.name),email:String(r.email),role:r.id===owner?'负责人':'协作者'})),candidates:candidates.map(r=>({id:String(r.id),name:String(r.name),email:String(r.email)}))};
+ const events=await sql`select actor,target,action,created_at from apphub_project_access_event where organization_id=${a.organizationId} and project_id=${projectId} and action in ('grant','revoke','transfer:keep_previous','transfer:remove_previous') order by created_at desc,id desc limit 30`;
+ const names=await (await import('./user-names')).userNames(a.organizationId,events.flatMap(e=>[String(e.actor),String(e.target)]));
+ const activity=events.map(e=>({actor:names.get(String(e.actor))||'未提供姓名',target:names.get(String(e.target))||'未提供姓名',action:String(e.action),date:new Date(e.created_at).toISOString()}));
+ return {activity,ownerId:owner??null,isOwner:owner===a.id,canManage,members:rows.map(r=>({id:String(r.id),name:String(r.name),email:String(r.email),role:r.id===owner?'负责人':'协作者'})),candidates:candidates.map(r=>({id:String(r.id),name:String(r.name),email:String(r.email)}))};
 }
 export async function changeSharing(a:Actor,input:{projectId:string;userId:string;action:'grant'|'revoke'|'transfer';keepPrevious:boolean}){
  requireInteractive(a.apiKey);await assertWrite(a);

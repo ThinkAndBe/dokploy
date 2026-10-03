@@ -1,3 +1,4 @@
+import {withVersionLock,enforceVersion} from './version-governance';
 import {inspectTestSource} from './test-compatibility';
 import {assertWrite} from './apphub-rbac';
 import {readFile,writeFile,mkdir,mkdtemp,rm,readdir,stat} from 'node:fs/promises';
@@ -15,7 +16,7 @@ import {giteaToken} from './gitea-integration';
 import {repositoryPath} from './apphub-versions';
 import {readCodeArchive,safeCodePath} from './code-archive';
 import {versionInput} from './version-api';
-type Actor={id:string;organizationId:string;name:string;email:string};
+type Actor={id:string;organizationId:string;name:string;email:string;source?:'web'|'mcp'};
 const stageRoot=()=>process.env.APPHUB_CODE_UPLOAD_DIR||path.join(tmpdir(),'apphub-code-previews');
 const headers=()=>({Authorization:`token ${giteaToken()}`});
 export async function codeProject(a:Actor,id:string){
@@ -86,7 +87,8 @@ export async function previewCode(a:Actor,id:string,buffer:Buffer,stripRoot=fals
   return {id:preview.id,changes,fileCount:preview.fileCount,ignored:preview.ignored,removedWrapper:preview.removedWrapper,compatibility:inspectTestSource(archive.files)};
  }finally{await rm(repo.dir,{recursive:true,force:true});}
 }
-export async function commitCode(a:Actor,input:{previewId:string;name:string;description:string;projectId?:string}){
+export async function commitCode(a:Actor,input:{previewId:string;name:string;description:string;projectId?:string}){const preview=await loadPreview(a,input.previewId);return withVersionLock(preview.projectId,()=>commitCodeLocked(a,input));}
+async function commitCodeLocked(a:Actor,input:{previewId:string;name:string;description:string;projectId?:string}){
  await assertWrite(a);const preview=await loadPreview(a,input.previewId);if(input.projectId&&input.projectId!==preview.projectId)throw new Error('上传预览不属于授权项目');
  versionInput.parse({projectId:preview.projectId,name:input.name,commit:'0'.repeat(40),description:input.description});
  const archive=readCodeArchive(await readFile(path.join(stageRoot(),input.previewId+'.zip')),preview.stripRoot),repo=await repository(a,preview.projectId);
@@ -94,10 +96,12 @@ export async function commitCode(a:Actor,input:{previewId:string;name:string;des
   if(repo.head!==preview.base||repo.branch!==preview.branch)throw new Error('项目代码已被其他人更新，请重新上传并核对变更');
   const exists=await fetch(repo.p.api+'/tags/'+encodeURIComponent(input.name),{headers:headers(),redirect:'error',signal:AbortSignal.timeout(15000)});
   if(exists.ok)throw new Error('版本名称已存在，请使用新的版本号');if(exists.status!==404)throw new Error('无法核对版本名称，请稍后重试');
+  await enforceVersion(repo.p.api,input.name,a.organizationId,preview.projectId);
+  if(!preview.changes.length)throw new Error('代码没有变化，无需重复保存新版本；请直接使用已有版本测试');
   await repo.run(['read-tree','--empty']);const index:Buffer[]=[];
   for(const f of archive.files){const hash=(await repo.run(['hash-object','-w','--stdin'],f.data)).toString().trim();if(hash!==f.hash)throw new Error('文件校验失败');index.push(Buffer.from(`${f.mode} ${hash}\t${f.path}\0`));}
   await repo.run(['update-index','-z','--index-info'],Buffer.concat(index));const tree=(await repo.run(['write-tree'])).toString().trim();
-  const sha=(await repo.run(['commit-tree',tree,...(repo.head?['-p',repo.head]:[]),'-F','-'],`版本 ${input.name}\n\n${input.description}\n\nAppHub-User: ${a.id}\n`)).toString().trim();
+  const sha=(await repo.run(['commit-tree',tree,...(repo.head?['-p',repo.head]:[]),'-F','-'],`版本 ${input.name}\n\n${input.description}\n\nAppHub-Source: ${a.source==='mcp'?'mcp':'web'}\nAppHub-User: ${a.id}\n`)).toString().trim();
   await codeProject(a,preview.projectId);
   // CAS protects the branch, atomic push protects branch and tag together; never overwrite a version.
   await repo.run(['push','--atomic',`--force-with-lease=refs/heads/${repo.branch}:${repo.head}`,repo.remote,`${sha}:refs/heads/${repo.branch}`,`${sha}:refs/tags/${input.name}`]);

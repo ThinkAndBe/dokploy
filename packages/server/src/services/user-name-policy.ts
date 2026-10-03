@@ -13,5 +13,5 @@ export function commitActor(message:string) {
 export function commitPresentation(message:string,author:string,names:ReadonlyMap<string,string>) {
  const id=commitActor(message);
  return {author:id?actorName(id,names):author,
- message:id?message.replace(/(?:^|\n)AppHub-User: [A-Za-z0-9_-]{1,200}[ \t]*(?=\r?\n|$)/g,'').trimEnd():message};
+ message:id?message.replace(/\nAppHub-Source: (?:web|mcp)(?=\nAppHub-User: [A-Za-z0-9_-]{1,200}\s*$)/,'').replace(/(?:^|\n)AppHub-User: [A-Za-z0-9_-]{1,200}[ \t]*(?=\r?\n|$)/g,'').trimEnd():message};
 }

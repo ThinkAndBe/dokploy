@@ -123,13 +123,13 @@ export const projectRouter = createTRPCRouter({
   const p=await db.query.projects.findFirst({where:and(eq(projects.projectId,input.projectId),eq(projects.organizationId,ctx.session.activeOrganizationId)),columns:{projectId:true,giteaRepoUrl:true}});
   if(!p||!accessScope(member).project(input.projectId))throw new TRPCError({code:'NOT_FOUND',message:'项目不存在或尚未授权'});
   if(!p.giteaRepoUrl)throw new TRPCError({code:'PRECONDITION_FAILED',message:'项目尚未关联代码仓库'});
-  try{const result=await createRepositoryVersion(p.projectId,p.giteaRepoUrl,input.name,input.commit,input.description);await audit(ctx,{action:'create',resourceType:'project',resourceId:p.projectId,resourceName:'version:'+input.name});return result;}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'版本创建失败'});}
+  try{const result=await createRepositoryVersion(p.projectId,p.giteaRepoUrl,input.name,input.commit,input.description,ctx.session.activeOrganizationId);await audit(ctx,{action:'create',resourceType:'project',resourceId:p.projectId,resourceName:'version:'+input.name});return result;}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'版本创建失败'});}
  }),
  browseCode:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200),commit:z.string().regex(/^[a-f0-9]{40}$/),path:z.string().max(500).default('')})).query(async({ctx,input})=>{
   if(ctx.req.headers['x-api-key'])throw new TRPCError({code:'FORBIDDEN',message:'请登录项目页面查看代码'});
   try{return await browseCode({id:ctx.user.id,organizationId:ctx.session.activeOrganizationId,name:ctx.user.name||ctx.user.email,email:ctx.user.email},input);}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'读取代码失败'});}
  }),
- commitCode:protectedProcedure.input(z.object({previewId:z.string().uuid(),name:versionInput.shape.name,description:z.string().max(2000).default('')})).mutation(async({ctx,input})=>{
+ commitCode:protectedProcedure.input(z.object({previewId:z.string().uuid(),name:versionInput.shape.name,description:versionInput.shape.description})).mutation(async({ctx,input})=>{
   if(ctx.req.headers['x-api-key']||!process.env.APPHUB_PUBLIC_URL||ctx.req.headers.origin!==new URL(process.env.APPHUB_PUBLIC_URL).origin)throw new TRPCError({code:'FORBIDDEN',message:'请在 AppHub 项目页面保存版本'});
   try{return await commitCode({id:ctx.user.id,organizationId:ctx.session.activeOrganizationId,name:ctx.user.name||ctx.user.email,email:ctx.user.email},input);}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'保存代码失败'});}
  }),
