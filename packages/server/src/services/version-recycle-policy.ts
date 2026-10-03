@@ -6,3 +6,5 @@ export function versionBlockReason(refs:{head:boolean;active:boolean;current:boo
  if(refs.request)return '这个版本已有待处理的上线申请';
  return '';
 }
+
+export function canManageVersions(role:string,actor:string,owner?:string){return role!=='viewer'&&(role==='admin'||!!owner&&owner===actor);}

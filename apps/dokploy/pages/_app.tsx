@@ -6,7 +6,6 @@ setDefaultOptions({locale:zhCN});
 
 import type { NextPage } from "next";
 import type { AppProps } from "next/app";
-import { Inter } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import NextTopLoader from "nextjs-toploader";
 import type { ReactElement, ReactNode } from "react";
@@ -16,7 +15,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { api } from "@/utils/api";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = {style:{fontFamily:'Inter, "Inter Fallback"'}};
 
 export type NextPageWithLayout<P = {}, IP = P> = NextPage<P, IP> & {
 	getLayout?: (page: ReactElement) => ReactNode;

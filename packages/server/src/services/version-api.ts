@@ -6,6 +6,8 @@ export const changeVersionInput=z.object({
  projectId:z.string().min(1).max(200),
  name:z.string().min(1).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/,'版本名称格式无效').refine(name=>!name.includes('..')&&!name.endsWith('.')&&!name.endsWith('.lock'),'版本名称格式无效'),
  commit:versionInput.shape.commit,
- action:z.enum(['delete','restore']),
-}).strict();
+ action:z.enum(['delete','restore','protect','unprotect']),
+ reason:z.string().trim().min(5,'请填写至少5个字符的操作原因').max(500),
+ confirmation:z.string().max(80),
+}).strict().refine(input=>input.confirmation===input.name,{path:['confirmation'],message:'请输入完整版本号确认操作'});
 export const versionListOutput=z.object({page:z.number(),hasMore:z.boolean(),next:z.object({current:z.string().nullable(),patch:z.string(),minor:z.string(),major:z.string()}),tags:z.array(z.object({name:z.string(),sha:z.string(),author:z.string(),date:z.string(),description:z.string(),source:z.string()})),commits:z.array(z.object({sha:z.string(),message:z.string(),author:z.string(),date:z.string(),source:z.string()}))});

@@ -1,8 +1,2 @@
-import { Fraunces } from "next/font/google";
-
-export const displayFont = Fraunces({
-	subsets: ["latin"],
-	weight: ["600"],
-	style: ["normal", "italic"],
-	display: "swap",
-});
+// Same installed Fraunces font, served locally; build does not contact Google Fonts.
+export const displayFont = {className:"apphub-display-font"};
