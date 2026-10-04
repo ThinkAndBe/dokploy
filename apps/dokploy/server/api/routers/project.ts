@@ -1,6 +1,7 @@
+import {retentionPolicyInput} from '@dokploy/server/services/version-retention-policy';
 import {readProjectProfile,saveProjectProfile} from '@dokploy/server/services/project-profile';
 import {projectProfileInput} from '@dokploy/server/services/project-profile-policy';
-import {listRecycled,changeRecycled,versionManagement} from '@dokploy/server/services/version-recycle';
+import {listRecycled,changeRecycled,versionManagement,saveRetentionPolicy,recordVersionDeployment} from '@dokploy/server/services/version-recycle';
 import {versionInput,versionListOutput,changeVersionInput} from '@dokploy/server/services/version-api';
 import {browseCode,commitCode} from '@dokploy/server/services/project-code';
 import {readHandoff,canRevealCredential,revealCredential} from "@dokploy/server/services/apphub-handoff";
@@ -89,6 +90,14 @@ export const projectRouter = createTRPCRouter({
   try{return await saveProjectProfile(sharingActor(ctx),input);}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'项目资料保存失败'});}
  }),
 
+ recordVersionDeployment:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200),name:z.string().min(1).max(80),commit:z.string().regex(/^[a-f0-9]{40}$/),service:z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),image:z.string().regex(/^[a-zA-Z0-9._:/-]+@sha256:[a-f0-9]{64}$/),reason:z.string().trim().min(5).max(500)}).strict()).mutation(async({ctx,input})=>{
+  if(ctx.req.headers.origin!==process.env.APPHUB_PUBLIC_URL?.replace(/\/$/,''))throw new TRPCError({code:'FORBIDDEN',message:'请使用管理员会话登记部署'});
+  try{return await recordVersionDeployment(sharingActor(ctx),input);}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'部署登记失败'});}
+ }),
+ saveVersionRetention:protectedProcedure.input(z.object({policy:retentionPolicyInput,revision:z.number().int().min(0),reason:z.string().trim().min(5).max(500)}).strict()).mutation(async({ctx,input})=>{
+  if(ctx.req.headers.origin!==process.env.APPHUB_PUBLIC_URL?.replace(/\/$/,''))throw new TRPCError({code:'FORBIDDEN',message:'请从项目页面调整保留规则'});
+  try{return await saveRetentionPolicy(sharingActor(ctx),input);}catch(e){throw new TRPCError({code:'BAD_REQUEST',message:e instanceof Error?e.message:'规则保存失败'});}
+ }),
  versionManagement:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200)})).query(({ctx,input})=>versionManagement(sharingActor(ctx),input.projectId)),
  recycledVersions:protectedProcedure.input(z.object({projectId:z.string().min(1).max(200)})).query(({ctx,input})=>listRecycled(sharingActor(ctx),input.projectId)),
  changeVersion:protectedProcedure.input(changeVersionInput).mutation(async({ctx,input})=>{

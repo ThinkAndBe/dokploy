@@ -1,3 +1,5 @@
+import {assertVersionNotRecycled} from './version-retention';
+import {recycleSchema} from './version-recycle';
 import {buildSchema} from './build-store';
 import {randomUUID} from 'node:crypto';
 import {releaseSql as sql} from './release-store';
@@ -8,9 +10,11 @@ import {isProjectAdmin} from './project-sharing';
 export function assertTestedRelease(tier:string,status:string){if(tier!=='test'||status!=='deployed')throw new Error('请先完成测试部署，再申请上线');}
 export async function requestPublish(a:Actor,testedPlanId:string,description:string){
  requireInteractive(a.apiKey);const {plan:p}=await accessiblePlan(a,testedPlanId);assertTestedRelease(p.tier,p.status);
- await buildSchema();const [build]=await sql`select status from apphub_build_job where plan_id=${p.id}`;if(build&&build.status!=='ready')throw new Error('应用健康检查尚未通过，请先完成测试');
- const [r]=await sql`insert into apphub_publish_request(id,organization_id,project_id,tested_plan_id,created_by,description) values(${randomUUID()},${a.organizationId},${p.project_id},${p.id},${a.id},${description}) on conflict(organization_id,tested_plan_id) do update set tested_plan_id=excluded.tested_plan_id returning id,status`;
- return r;
+ await buildSchema();await recycleSchema();return sql.begin(async q=>{await q`select pg_advisory_xact_lock(hashtext(${p.project_id}),63001)`;
+ const [build]=await q`select status,commit_sha from apphub_build_job where plan_id=${p.id} and organization_id=${a.organizationId}`;
+ if(build)await assertVersionNotRecycled(q,a.organizationId,p.project_id,String(build.commit_sha));if(build&&build.status!=='ready')throw new Error('应用健康检查尚未通过，请先完成测试');
+ const [r]=await q`insert into apphub_publish_request(id,organization_id,project_id,tested_plan_id,created_by,description) values(${randomUUID()},${a.organizationId},${p.project_id},${p.id},${a.id},${description}) on conflict(organization_id,tested_plan_id) do update set tested_plan_id=excluded.tested_plan_id returning id,status`;
+ return r;});
 }
 export async function publishRequests(a:Actor){
  const m=await findMemberByUserId(a.id,a.organizationId);

@@ -1,3 +1,4 @@
+import {assertVersionNotRecycled} from './version-retention';
 import {validateStackArtifacts,prepareStackSecrets} from './stack-runtime';
 import {recycleSchema} from './version-recycle';
 import {inspectProjectTest} from './test-source';
@@ -55,6 +56,7 @@ export async function startBuild(a:Actor,input:{projectId:string;commit?:string;
  if(last&&(last.manifest.port!==parsed.port||JSON.stringify(last.manifest.storage)!==JSON.stringify(parsed.storage)))throw new Error('测试服务端口或数据目录发生变化，请管理员调整已有服务后再测试');
  await ensureProject(a,input.projectId);await recycleSchema();
  return sql.begin(async q=>{await q`select pg_advisory_xact_lock(hashtext(${input.projectId}),63001)`;
+ await assertVersionNotRecycled(q,a.organizationId,input.projectId,commit!);
  const [running]=await q`select * from apphub_build_job where project_id=${input.projectId} and status in ('queued','building','built','deploying') order by created_at desc limit 1`;
  if(running){if(running.commit_sha===commit)return {id:running.id};throw new Error('项目已有任务正在执行，请等待或取消该构建');}
  const id=randomUUID(),repository=prefix()+'/project-'+createHash('sha256').update(input.projectId).digest('hex').slice(0,20);

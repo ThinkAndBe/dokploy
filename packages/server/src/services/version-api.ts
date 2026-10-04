@@ -9,5 +9,6 @@ export const changeVersionInput=z.object({
  action:z.enum(['delete','restore','protect','unprotect']),
  reason:z.string().trim().min(5,'请填写至少5个字符的操作原因').max(500),
  confirmation:z.string().max(80),
+ holdDays:z.number().int().min(1).max(365).optional(),
 }).strict().refine(input=>input.confirmation===input.name,{path:['confirmation'],message:'请输入完整版本号确认操作'});
 export const versionListOutput=z.object({page:z.number(),hasMore:z.boolean(),next:z.object({current:z.string().nullable(),patch:z.string(),minor:z.string(),major:z.string()}),tags:z.array(z.object({name:z.string(),sha:z.string(),author:z.string(),date:z.string(),description:z.string(),source:z.string()})),commits:z.array(z.object({sha:z.string(),message:z.string(),author:z.string(),date:z.string(),source:z.string()}))});
